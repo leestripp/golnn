@@ -1,6 +1,6 @@
 # golnn v0.5.0
 
-<iframe width="560" height="315" src="https://www.youtube.com/embed/T0ZFqmc2e38?si=MCB73gAaJPo5LG32" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+[Watch the Video](https://www.youtube.com/embed/T0ZFqmc2e38?si=MCB73gAaJPo5LG32)
 
 **Evolving AI Agents in a 3D World | Artificial Life Simulation in C++ & OpenGL**
 
