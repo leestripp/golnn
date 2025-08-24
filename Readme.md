@@ -1,10 +1,10 @@
-### **YouTube Title:**
+# golnn v0.5.0
 
 **Evolving AI Agents in a 3D World | Artificial Life Simulation in C++ & OpenGL**
 
 ---
 
-### **YouTube Description:**
+## Description
 
 Check out my 3D artificial life simulation, built from scratch in modern C++! In this project, autonomous agents with their own Recurrent Neural Network (RNN) brains learn to survive, hunt for food, and reproduce in a dynamic 3D environment.
 
