@@ -1,6 +1,6 @@
 # golnn v0.5.0
 
-[Watch the Video](https://www.youtube.com/embed/T0ZFqmc2e38?si=MCB73gAaJPo5LG32)
+[![Watch the Video](https://www.youtube.com/embed/T0ZFqmc2e38?si=MCB73gAaJPo5LG32)](https://www.youtube.com/watch?v=T0ZFqmc2e38&t=604s)
 
 **Evolving AI Agents in a 3D World | Artificial Life Simulation in C++ & OpenGL**
 
