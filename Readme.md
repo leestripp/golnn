@@ -1,40 +1,93 @@
-# golnn v0.5.0
+# golnn v0.7.0
 
 [![Watch the Video](https://www.youtube.com/embed/T0ZFqmc2e38?si=MCB73gAaJPo5LG32)](https://www.youtube.com/watch?v=T0ZFqmc2e38&t=604s)
 
 **Evolving AI Agents in a 3D World | Artificial Life Simulation in C++ & OpenGL**
 
----
+This project is a C++ and OpenGL-based artificial life simulation where autonomous agents evolve complex behaviors in a 3D environment. Each agent is controlled by its own unique Recurrent Neural Network (RNN) that mutates and is passed down through generations. The simulation provides a sandbox for exploring emergent behaviors as agents compete for resources, evade threats, and reproduce.
 
-## Description
+## Features
 
-Check out my 3D artificial life simulation, built from scratch in modern C++! In this project, autonomous agents with their own Recurrent Neural Network (RNN) brains learn to survive, hunt for food, and reproduce in a dynamic 3D environment.
+### Evolving Neural Networks
 
-In the video, you can see the agents' behaviors change based on their needs. Their color indicates their current state:
-🟡 **Yellow (HUNT):** Low on energy, actively seeking the nearest food source.
-🔵 **Blue (ROAM):** Following other agents, a social behavior that can lead them to food clusters.
-⚪ **Grey (IDLE):** No immediate threats or targets, conserving energy.
+*   **Randomized Brain Structure:** New agents are spawned with a randomized number of hidden layers and neurons per layer (up to a configured maximum), promoting architectural diversity from the start.
+*   **Genetic Inheritance & Mutation:** When an agent reproduces, its offspring inherits the parent's RNN weights and structure, with a small chance of mutation. This allows for the gradual evolution of behaviors over generations.
+*   **Evolving Learning Rates:** Each agent has its own learning rate (between `0.0001` and `0.01`), which also mutates upon reproduction. This allows the simulation to discover optimal learning speeds for different strategies.
 
-**How It Works:**
-Each agent's "brain" is a custom Recurrent Neural Network. On every simulation tick, the simulation uses a technique called "Teacher Forcing" to train the agent. It calculates the ideal action based on the agent's state (like moving towards food) and teaches the network to produce that result.
+### Complex Agent Behaviors
 
-When an agent gathers enough energy, it reproduces, creating an offspring. The child inherits the parent's neural network, but with slight random mutations. Over many generations, these mutations allow the agents to evolve more efficient and interesting survival strategies.
+*   **Two Agent Types:**
+    *   **Feeders (Blue):** These agents seek out food to gain energy. They will actively flee from nearby Predators.
+    *   **Predators (Yellow):** These agents hunt Feeders to drain their energy. If no Feeders are available, they will resort to cannibalism and hunt other Predators.
+*   **State-Driven AI:** Agents operate on a simple state machine (Idle, Hunt, Flee, Roam) which guides their high-level goals. The RNN is then trained in real-time to execute the actions required to fulfill these goals.
+*   **Vector-Based Perception:** Agents perceive their world not in absolute coordinates, but in terms of a **direction vector and distance** to targets (food, threats, other agents). This makes their learned behaviors more robust and independent of their absolute position in the world.
 
-**Key Features:**
-*   A 3D simulation world with a fly-through camera (WASD controls).
-*   Agents with a full lifecycle: energy decay, eating, reproduction, and death.
-*   Each agent is controlled by its own unique Recurrent Neural Network.
-*   Real-time training and evolution through mutation.
-*   Dynamic agent behaviors and emergent group dynamics.
+### Dynamic Simulation Environment
 
-**Technology Stack:**
+*   **Energy Dynamics:** Agents consume energy over time and must eat to replenish it. Energy levels directly influence an agent's color—brighter means higher energy, darker means lower energy.
+*   **Reproduction & Population Control:** Agents with sufficient energy will reproduce, splitting their energy with their offspring. To prevent population explosions, agents stop actively hunting for food once they have enough energy to reproduce, and a global agent limit is enforced.
+*   **Alpha Agent Tracking:** When the simulation ends (i.e., the last agent dies), the console outputs the characteristics of this final "Alpha Agent"—including its type, hidden layer count, and neurons per layer. This provides valuable insight into which traits were most successful.
+
+### Interactive 3D Visualization
+
+*   Built with modern OpenGL and a `gtkmm-4.0` window.
+*   A free-look camera allows you to observe the simulation from any angle.
+*   Runtime controls to dynamically spawn new agents and food.
+
+## Core Technologies
+
 *   **Language:** C++20
-*   **Graphics:** OpenGL with GLEW
-*   **GUI/Windowing:** GTKmm 4
-*   **3D Math:** GLM (OpenGL Mathematics)
+*   **Graphics:** OpenGL 3.3+
+*   **Windowing/UI:** gtkmm-4.0
+*   **Math:** GLM (OpenGL Mathematics)
+*   **OpenGL Loading:** GLEW
 *   **Build System:** CMake
 
-This project was a fantastic challenge, combining AI concepts like neural networks and evolutionary algorithms with real-time 3D graphics programming. Let me know what you think in the comments!
+## Building the Project
 
----
-#cpp #ai #neuralnetworks #simulation #artificiallife #opengl #gamedev #programming #evolution
+This project uses CMake. Ensure you have the required dependencies installed on your Linux system.
+
+### Dependencies (Debian/Ubuntu)
+
+```bash
+sudo apt-get update
+sudo apt-get install build-essential cmake pkg-config libgtkmm-4.0-dev libglew-dev libglm-dev libopenal-dev cppcheck
+```
+
+### Build Steps
+
+```bash
+# 1. Clone the repository
+git clone <gitlab-repo-url>
+cd <project-directory>
+
+# 2. Create and enter a build directory
+mkdir build && cd build
+
+# 3. Configure the project with CMake
+cmake ..
+
+# 4. Compile the project (using all available CPU cores)
+make -j$(nproc)
+
+# 5. (Optional) Run static analysis with cppcheck
+make cppcheck
+```
+
+## Running the Simulation
+
+After a successful build, the executable will be located in the `build/GameOfLifeNN` directory.
+
+```bash
+cd build/GameOfLifeNN
+./golnn
+```
+
+## Controls
+
+*   **Move Camera:** `W`, `A`, `S`, `D`
+*   **Sprint Camera:** Hold `Left Shift` while moving
+*   **Look Around:** Hold `Left Mouse Button` and drag the mouse
+*   **Spawn New Agents:** Press `E`
+*   **Spawn New Food:** Press `R`
+*   **Quit:** Press `Esc`

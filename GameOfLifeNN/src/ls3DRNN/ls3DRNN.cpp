@@ -274,3 +274,16 @@ glm::mat4 ls3DRNN::create_transform_from_params(const vector<float>& params) con
 
 	return transform;
 }
+
+
+vector<size_t> ls3DRNN::get_hidden_layer_dims() const
+{
+    const auto& all_dims = m_cell->m_layer_dims;
+    if (all_dims.size() <= 2)
+	{
+        return {}; // No hidden layers
+    }
+    // Return a sub-vector excluding the first (input) and last (output) elements.
+    return vector<size_t>(all_dims.begin() + 1, all_dims.end() - 1);
+}
+

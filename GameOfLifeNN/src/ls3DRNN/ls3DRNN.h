@@ -35,6 +35,9 @@ public:
 	vector<float> get_prediction(const vector<float>& command) const;
 	void train_step(const vector<float>& command, const vector<float>& target_params, float learning_rate, float rotation_weight);
 	
+	// Returns the dimensions of the hidden layers.
+	vector<size_t> get_hidden_layer_dims() const;
+	
 private:
 	glm::mat4 m_hidden_state;
 	unique_ptr<ls3DRNN_MLP_Private> m_cell;

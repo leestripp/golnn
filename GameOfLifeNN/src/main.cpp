@@ -74,7 +74,7 @@ private:
 
 Game::Game() :
 	m_app(Gtk::Application::create("com.lscppdev.golnn", Gio::Application::Flags::DEFAULT_FLAGS)),
-	m_simulation(20, 100, 50.0f)
+	m_simulation(50, 25, 50.0f)
 {
 	// We now connect a signal handler for when the application starts up.
 	// The main window and all its children will be created here.
@@ -217,7 +217,6 @@ void Game::on_key_released(guint keyval, guint, Gdk::ModifierType)
     }
 }
 
-
 bool Game::on_timer_tick()
 {
     // Update camera every frame, as this should be as smooth as possible
@@ -232,7 +231,7 @@ bool Game::on_timer_tick()
         m_simulation.tick();
 		
 		// debug
-        std::cout << "Timer tick. Agents: " << m_simulation.m_agents.size() << ", Food: " << m_simulation.m_food.size() << std::endl;
+        // std::cout << "Timer tick. Agents: " << m_simulation.m_agents.size() << ", Food: " << m_simulation.m_food.size() << std::endl;
         
         m_tick_accumulator -= TICK_RATE_MS;
     }

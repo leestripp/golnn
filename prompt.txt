@@ -1,0 +1,22 @@
+NEVER give me diff files. You can give a full function if that all we need to change.
+Evolving AI Agents in a 3D World.
+Artificial Life Simulation in C++ & OpenGL. gtkmm4 for the window.
+When Agents sqawn, we should give them random amounts of neurons. We would need a MAX_LAYER_COUNT and MAX_NEURON_COUNT, so we don't have brains to large.
+When an Agent replicates, the child will get the parents brain with a small mutation.
+Lets change the inputs to the Agent brain. Instead of giveing position to food and agents, lets give a vector (direction) and distance.
+When the last Agent dies, we should output its Agent type, hidden layer count and neuron cunt per layer. So we can track the Alpha Agent settings.
+Agent types:
+* Preditor : These agents drain the energy from other agents.
+* Feeder: Standard agents, flee from Preditor aagents, feed and rest.
+Feeder Feeding distance: feeders must be closer the 1 unit from food to eat.
+Predator eating distance: predators must be closer the 1 unit from agents to eat.
+Random learning rates: Between 0.01 and 0.0001, to add more variation.
+Colours: Only set base colours, then adjust based on energy level. Bright = high energy. dark = low energy, as a factor.
+Predators Base Colour : Yellow (1.0f, 1.0f, 0.0f)
+Feeders Base Colour : Deep Blue (0.0f, 0.0f, 1.0f)
+Predators should eat each other if there isn't a Feeder to eat.
+When Agents reproduce, double check the energy level isn't to high. We had an issue of population explosion at one point.
+All Done for now!
+
+We need a new Readme.md file for GitLab, Can you create one for me.
+
