@@ -2,6 +2,8 @@
 #define AGENT_H
 
 #include "ls3DRNN.h"
+#include "lsRNN.h"
+#include "lsVecTokenizer.h"
 #include <glm/glm.hpp>
 #include <vector>
 
@@ -45,9 +47,17 @@ public:
     glm::vec3 m_color; // Final color for visualization, adjusted for energy
 	AgentType m_type;  // The type of agent
  	
+    // State Brain Parameters
+    static constexpr size_t NUM_ENERGY_BINS = 4;
+    static constexpr size_t NUM_DISTANCE_BINS = 4;
+    static constexpr size_t STATE_BRAIN_INPUT_DIM = NUM_ENERGY_BINS + NUM_DISTANCE_BINS;
+    static constexpr size_t NUM_STATES = 4; // IDLE, ROAM, HUNT, FLEE
+    static constexpr size_t STATE_BRAIN_HIDDEN_DIM = 16;
+	
 private:
     void update_state_transitions(const Simulation& world);
-    void train_brain(const Simulation& world, const std::vector<float>& perception_vector);
+    void train_brain(const Simulation& world, const std::vector<float>& perception_vector, float learning_rate);
+    void train_state_brain();
     std::vector<float> perceive(const Simulation& world) const;
 
     // These are the target positions for the RNN inputs, updated each tick.
@@ -59,11 +69,15 @@ private:
     glm::vec3 m_base_color;      // Base color determined by agent type
     float m_energy_decay_rate; // Agent's specific energy decay per tick
     float m_learning_rate;     // Each agent has its own learning rate
+    lsRNN m_state_brain;       // New state-selection brain
+
+    State m_last_state;        // State from the previous tick, for reward logic
+    float m_last_energy;       // Energy from the previous tick, for reward logic
 
     // Simulation Parameters
     static constexpr float INITIAL_ENERGY = 100.0f;
     static constexpr int MAX_AGE = 5000;
-    static constexpr float MAX_SPEED = 0.75f;
+    static constexpr float MAX_SPEED = 1.0f;
 	static constexpr float ROTATION_LERP_FACTOR = 0.25f;
 	
 	static constexpr float ROTATION_WEIGHT = 0.25f;
@@ -73,11 +87,11 @@ private:
     static constexpr float MUTATION_AMOUNT = 0.01f; // Max change during mutation
 	
     // Agent Type Specific Parameters
-    static constexpr float FEEDER_ENERGY_DECAY = 0.1f;
-    static constexpr float PREDATOR_ENERGY_DECAY = 0.15f; // Predators die off to quick, their food is moving.
+    static constexpr float FEEDER_ENERGY_DECAY = 0.02f;
+    static constexpr float PREDATOR_ENERGY_DECAY = 0.06f; // Predators die off to quick, their food is moving.
 	
-    static constexpr float FEEDER_ENERGY_TO_REPRODUCE = 140.0f;
-    static constexpr float PREDATOR_ENERGY_TO_REPRODUCE = 155.0f;
+    static constexpr float FEEDER_ENERGY_TO_REPRODUCE = 110.0f;
+    static constexpr float PREDATOR_ENERGY_TO_REPRODUCE = 130.0f;
 	
     // State transition parameters
     static constexpr float ROAM_FOLLOW_RADIUS_SQ = 50.0f;			// ~7 units squared
