@@ -49,16 +49,17 @@ public:
  	
     // State Brain Parameters
     static constexpr size_t NUM_ENERGY_BINS = 4;
-    static constexpr size_t NUM_DISTANCE_BINS = 4;
-    static constexpr size_t STATE_BRAIN_INPUT_DIM = NUM_ENERGY_BINS + NUM_DISTANCE_BINS;
+    static constexpr size_t NUM_DISTANCE_BINS = 4;        // For enemy distance
+    static constexpr size_t NUM_FOOD_DISTANCE_BINS = 4;   // For food distance
+    static constexpr size_t STATE_BRAIN_INPUT_DIM = NUM_ENERGY_BINS + NUM_DISTANCE_BINS + NUM_FOOD_DISTANCE_BINS;
     static constexpr size_t NUM_STATES = 4; // IDLE, ROAM, HUNT, FLEE
     static constexpr size_t STATE_BRAIN_HIDDEN_DIM = 16;
 	
 private:
     void update_state_transitions(const Simulation& world);
     void train_brain(const Simulation& world, const std::vector<float>& perception_vector, float learning_rate);
-    void train_state_brain();
-    std::vector<float> perceive(const Simulation& world) const;
+    void train_state_brain(const Simulation& world);
+    std::vector<float> perceive(const Simulation& world);
 
     // These are the target positions for the RNN inputs, updated each tick.
     // They are set to zero if no target is available in the current state.
@@ -83,20 +84,22 @@ private:
 	static constexpr float ROTATION_WEIGHT = 0.25f;
 	
     // --- Mutation Parameters ---
-    static constexpr float MUTATION_RATE = 0.05f;   // 5% chance for a weight/bias to mutate
+    static constexpr float MUTATION_RATE = 0.02f;   // 2% chance for a weight/bias to mutate
     static constexpr float MUTATION_AMOUNT = 0.01f; // Max change during mutation
 	
     // Agent Type Specific Parameters
-    static constexpr float FEEDER_ENERGY_DECAY = 0.02f;
-    static constexpr float PREDATOR_ENERGY_DECAY = 0.06f; // Predators die off to quick, their food is moving.
+    static constexpr float FEEDER_ENERGY_DECAY = 0.05f;
+    static constexpr float PREDATOR_ENERGY_DECAY = 0.1f; // Predators die off to quick, their food is moving.
 	
-    static constexpr float FEEDER_ENERGY_TO_REPRODUCE = 110.0f;
-    static constexpr float PREDATOR_ENERGY_TO_REPRODUCE = 130.0f;
+    static constexpr float FEEDER_ENERGY_TO_REPRODUCE = 120.0f;
+    static constexpr float PREDATOR_ENERGY_TO_REPRODUCE = 150.0f;
 	
     // State transition parameters
     static constexpr float ROAM_FOLLOW_RADIUS_SQ = 50.0f;			// ~7 units squared
-	static constexpr float PREDATOR_DETECTION_RADIUS_SQ = 100.0f;	// 10 units squared
-    static constexpr float PREDATOR_HUNT_RADIUS_SQ = 225.0f;        // 15 units squared
+	static constexpr float PREDATOR_DETECTION_RADIUS_SQ = 400.0f;	// 20 units squared
+    static constexpr float FEEDER_FOOD_DETECTION_RADIUS_SQ = 400.0f; // 20 units squared
+    static constexpr float PREDATOR_HUNT_RADIUS_SQ = 400.0f;        // 20 units squared
 };
 
 #endif // AGENT_H
+

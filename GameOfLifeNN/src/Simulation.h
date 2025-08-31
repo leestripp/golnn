@@ -12,10 +12,11 @@ struct Food {
     glm::vec3 position;
 };
 
-class Simulation {
+class Simulation
+{
 public:
     Simulation(size_t initial_agents, size_t initial_food, float world_size);
-
+	
     // The main function that runs one step of the simulation
     void tick();
 

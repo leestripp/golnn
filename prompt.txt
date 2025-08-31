@@ -3,48 +3,23 @@ Artificial Life Simulation in C++ & OpenGL. gtkmm4 for the window.
 ls3DRNN: Used for movement in 3D space.
 * When Agents spawn, we should give them random amounts of neurons. We would need a MAX_LAYER_COUNT and MAX_NEURON_COUNT, so we don't have brains to large.
 * When an Agent replicates, the child will get the parents brain with a small mutation.
-* Lets change the inputs to the Agent brain. Instead of giveing position to food and agents, lets give a vector (direction) and distance.
+* Inputs to the Agent brain. Instead of giveing position to food and agents, lets give a vector (direction) and distance.
 When the last Agent dies, we should output its Agent type, hidden layer count and neuron cunt per layer. So we can track the Alpha Agent settings.
 Agent types:
 * Preditor : These agents drain the energy from other agents.
 * Feeder: Standard agents, flee from Preditor aagents, feed and rest.
-Feeder Feeding distance: feeders must be closer the 1 unit from food to eat.
-Predator eating distance: predators must be closer the 1 unit from agents to eat.
-Random learning rates: Between 0.01 and 0.0001, to add more variation.
+Feeder Feeding distance: feeders must be closer then 1 unit from food to eat. But detect food 20 units away.
+Predator eating distance: predators must be closer the 1 unit from feeder agents to eat. But can detect them from 20 units away.
+Random learning rates: Between 0.01 and 0.0005, to add more variation.
 Colours: Only set base colours, then adjust based on energy level. Bright = high energy. dark = low energy, as a factor.
 Predators Base Colour : Yellow (1.0f, 1.0f, 0.0f)
 Feeders Base Colour : Deep Blue (0.0f, 0.0f, 1.0f)
 Predators should eat each other if there isn't a Feeder to eat.
 When Agents reproduce, double check the energy level isn't to high. We had an issue of population explosion at one point.
-ls3DRNN: Is working DO NOT modify.
-I've added lsRNN, pick states based on Energy Level and distance to enemy (predator).
-lsRNN: Used to choose the STATe an agent is in.
-Represent a vector of Energy and distance to Enemy and feed it to m_state_brain lsRNN.
+ls3DRNN: Is working DO NOT modify it.
+I've added lsRNN, to pick states based on Energy Level, distance to food and distance to enemy (predator).
+lsRNN: Used to choose the STATE an agent is in.
+Represent a vector of Energy, distance to food and distance to Enemy. Then feed it to m_state_brain lsRNN, from this we choose a STATE for the Agent.
 Teacher guided training. As we have the States we need. IDLE, HUNT, ROAM and FLEE.
 
-They are NOT eating, (HUNT), we need to reward them for eating.
-
-Compiile errors:
-lee@dev-pc "cpp-dev" build %> make
-[ 12%] Building CXX object GameOfLifeNN/CMakeFiles/golnn.dir/src/Agent.cpp.o
-/home/lee/projects/Programming/projects_C++/GameOfLifeNN/GameOfLifeNN/src/Agent.cpp:18:13: error: ‘mt19137’ in namespace ‘std’ does not name a type; did you mean ‘mt19937’?
-   18 | static std::mt19137 agent_gen(rd());
-      |             ^~~~~~~
-      |             mt19937
-In file included from /home/lee/projects/Programming/projects_C++/GameOfLifeNN/GameOfLifeNN/src/Agent.cpp:1:
-/home/lee/projects/Programming/projects_C++/GameOfLifeNN/GameOfLifeNN/src/Agent.h: In constructor ‘Agent::Agent(ls3DRNN, const glm::mat4&, AgentType, float, float)’:
-/home/lee/projects/Programming/projects_C++/GameOfLifeNN/GameOfLifeNN/src/Agent.h:74:11: warning: ‘Agent::m_last_state’ will be initialized after [-Wreorder]
-   74 |     State m_last_state;        // State from the previous tick, for reward logic
-      |           ^~~~~~~~~~~~
-/home/lee/projects/Programming/projects_C++/GameOfLifeNN/GameOfLifeNN/src/Agent.h:47:15: warning:   ‘glm::vec3 Agent::m_color’ [-Wreorder]
-   47 |     glm::vec3 m_color; // Final color for visualization, adjusted for energy
-      |               ^~~~~~~
-/home/lee/projects/Programming/projects_C++/GameOfLifeNN/GameOfLifeNN/src/Agent.cpp:38:1: warning:   when initialized here [-Wreorder]
-   38 | Agent::Agent(ls3DRNN brain, const glm::mat4& initial_transform, AgentType type, float learning_rate, float initial_energy) :
-      | ^~~~~
-/home/lee/projects/Programming/projects_C++/GameOfLifeNN/GameOfLifeNN/src/Agent.cpp:58:35: error: ‘agent_gen’ was not declared in this scope
-   58 |         m_learning_rate = lr_dist(agent_gen);
-      |                                   ^~~~~~~~~
-make[2]: *** [GameOfLifeNN/CMakeFiles/golnn.dir/build.make:79: GameOfLifeNN/CMakeFiles/golnn.dir/src/Agent.cpp.o] Error 1
-make[1]: *** [CMakeFiles/Makefile2:139: GameOfLifeNN/CMakeFiles/golnn.dir/all] Error 2
-make: *** [Makefile:91: all] Error 2
+Increase distance to find food.

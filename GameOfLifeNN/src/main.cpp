@@ -74,7 +74,7 @@ private:
 
 Game::Game() :
 	m_app(Gtk::Application::create("com.lscppdev.golnn", Gio::Application::Flags::DEFAULT_FLAGS)),
-	m_simulation(100, 100, 100.0f)
+	m_simulation(100, 50, 50.0f)
 {
 	// We now connect a signal handler for when the application starts up.
 	// The main window and all its children will be created here.
