@@ -1,93 +1,105 @@
-# golnn v0.7.0
+# golnn v0.8.0
 
 [![Watch the Video](https://www.youtube.com/embed/T0ZFqmc2e38?si=MCB73gAaJPo5LG32)](https://www.youtube.com/watch?v=T0ZFqmc2e38&t=604s)
 
-**Evolving AI Agents in a 3D World | Artificial Life Simulation in C++ & OpenGL**
+This project is an Artificial Life simulation built in C++ and OpenGL. It features autonomous agents, powered by Recurrent Neural Networks (RNNs), that live, eat, reproduce, and evolve in a 3D environment. The simulation uses a dual-network architecture to create complex and emergent behaviors. The user interface and windowing are handled by gtkmm4.
 
-This project is a C++ and OpenGL-based artificial life simulation where autonomous agents evolve complex behaviors in a 3D environment. Each agent is controlled by its own unique Recurrent Neural Network (RNN) that mutates and is passed down through generations. The simulation provides a sandbox for exploring emergent behaviors as agents compete for resources, evade threats, and reproduce.
+## Core Features
 
-## Features
+-   **3D Environment:** A fully 3D world rendered with modern OpenGL.
+-   **Autonomous Agents:** The world is populated by agents whose actions are determined entirely by their neural network "brains".
+-   **Evolutionary Algorithm:** Agents that successfully gather energy can reproduce, passing their neural network weights to their offspring with a chance of mutation. This allows for the evolution of successful strategies over time.
+-   **Diverse Population:** New agents are spawned with randomized brain architectures (varying numbers of hidden layers and neurons), creating a diverse gene pool for evolution to act upon.
+-   **Two Agent Types:**
+    -   **Feeders (Blue):** These agents seek out food, flee from predators, and try to survive.
+    -   **Predators (Yellow):** These agents hunt Feeders to gain energy. If no Feeders are available, they will resort to cannibalism.
+-   **Dual-Network AI Architecture:** Each agent uses two distinct neural networks that work in concert to make decisions.
+-   **Interactive Camera:** A fly-through camera allows you to observe the simulation from any angle.
 
-### Evolving Neural Networks
+## The Dual-Network AI Architecture
 
-*   **Randomized Brain Structure:** New agents are spawned with a randomized number of hidden layers and neurons per layer (up to a configured maximum), promoting architectural diversity from the start.
-*   **Genetic Inheritance & Mutation:** When an agent reproduces, its offspring inherits the parent's RNN weights and structure, with a small chance of mutation. This allows for the gradual evolution of behaviors over generations.
-*   **Evolving Learning Rates:** Each agent has its own learning rate (between `0.0001` and `0.01`), which also mutates upon reproduction. This allows the simulation to discover optimal learning speeds for different strategies.
+A key feature of this simulation is the separation of high-level strategy from low-level motor control. Each agent has two brains that work together.
 
-### Complex Agent Behaviors
+### 1. `lsRNN` - The State Selection Network
 
-*   **Two Agent Types:**
-    *   **Feeders (Blue):** These agents seek out food to gain energy. They will actively flee from nearby Predators.
-    *   **Predators (Yellow):** These agents hunt Feeders to drain their energy. If no Feeders are available, they will resort to cannibalism and hunt other Predators.
-*   **State-Driven AI:** Agents operate on a simple state machine (Idle, Hunt, Flee, Roam) which guides their high-level goals. The RNN is then trained in real-time to execute the actions required to fulfill these goals.
-*   **Vector-Based Perception:** Agents perceive their world not in absolute coordinates, but in terms of a **direction vector and distance** to targets (food, threats, other agents). This makes their learned behaviors more robust and independent of their absolute position in the world.
+This is the agent's "strategic brain." It is a simple Recurrent Neural Network responsible for deciding the agent's current high-level **state**.
 
-### Dynamic Simulation Environment
+-   **Purpose:** To choose one of four states: `IDLE`, `ROAM`, `HUNT`, or `FLEE`.
+-   **Inputs:** It processes a simplified, abstract view of the world:
+    -   Current Energy Level (quantized into bins).
+    -   Distance to the nearest Threat (enemy agent, binned).
+    -   Distance to the nearest Food source (binned).
+-   **Output:** A classification that determines the agent's current state.
+-   **Training:** This network is trained using "teacher-forcing." A set of hardcoded rules determines the "correct" state for any given situation (e.g., if a predator is near and energy is high, the correct state is `FLEE`). The `lsRNN` is trained at every step to mimic this "teacher," allowing it to quickly learn the fundamental logic of survival.
 
-*   **Energy Dynamics:** Agents consume energy over time and must eat to replenish it. Energy levels directly influence an agent's color—brighter means higher energy, darker means lower energy.
-*   **Reproduction & Population Control:** Agents with sufficient energy will reproduce, splitting their energy with their offspring. To prevent population explosions, agents stop actively hunting for food once they have enough energy to reproduce, and a global agent limit is enforced.
-*   **Alpha Agent Tracking:** When the simulation ends (i.e., the last agent dies), the console outputs the characteristics of this final "Alpha Agent"—including its type, hidden layer count, and neurons per layer. This provides valuable insight into which traits were most successful.
+### 2. `ls3DRNN` - The Movement Control Network
 
-### Interactive 3D Visualization
+This is the agent's "motor cortex." It takes the high-level state from the `lsRNN` and turns it into concrete actions in the 3D world.
 
-*   Built with modern OpenGL and a `gtkmm-4.0` window.
-*   A free-look camera allows you to observe the simulation from any angle.
-*   Runtime controls to dynamically spawn new agents and food.
+-   **Purpose:** To generate the precise translation and rotation needed to move the agent.
+-   **Inputs:** It receives a detailed "perception vector" containing:
+    -   The world position (x, y, z) and distance to the nearest food.
+    -   The world position and distance to a nearby friendly agent to follow.
+    -   The world position and distance to a threat or prey.
+    -   The agent's own energy level.
+    -   **Crucially, it also receives the current state (e.g., `HUNT`) from the `lsRNN` as a one-hot encoded vector.**
+-   **Output:** A 7-dimensional vector that defines a delta-transform: 3 values for translation and 4 values for a rotation quaternion.
+-   **Training:** This network is also trained via teacher-forcing. Based on the current state, an "ideal" movement is calculated (e.g., in the `HUNT` state, the ideal movement is towards the target). The `ls3DRNN` is then trained to produce the output that achieves this ideal movement.
 
-## Core Technologies
+### Synergy
 
-*   **Language:** C++20
-*   **Graphics:** OpenGL 3.3+
-*   **Windowing/UI:** gtkmm-4.0
-*   **Math:** GLM (OpenGL Mathematics)
-*   **OpenGL Loading:** GLEW
-*   **Build System:** CMake
+The two networks create a powerful synergy. The `lsRNN` decides **what to do**, and the `ls3DRNN` figures out **how to do it**. By feeding the state into the movement brain, we provide essential context. The `ls3DRNN` learns different movement patterns for different states, leading to more intelligent and nuanced behavior. For example, it learns to move towards a target when hunting, but away from the *same* target when fleeing.
 
-## Building the Project
+## Evolution and Learning
 
-This project uses CMake. Ensure you have the required dependencies installed on your Linux system.
+-   **Randomized Brains:** When agents are first spawned, their `ls3DRNN` brains are given a random number of hidden layers and neurons (up to a defined maximum). This creates variety in the initial population.
+-   **Reproduction & Mutation:** When an agent gathers enough energy, it reproduces. The child inherits a copy of the parent's `ls3DRNN`, but with small, random mutations applied to its weights and biases. This is the core mechanism of evolution.
+-   **Alpha Agent Tracking:** When the simulation ends because the last agent has died, the console will output the brain architecture of this final "alpha" agent. This helps track which brain structures were the most successful survivors.
 
-### Dependencies (Debian/Ubuntu)
+## Building and Running
 
+### Dependencies
+
+The project uses CMake to manage dependencies. You will need the development packages for:
+-   `gtkmm-4.0`
+-   `sigc++-3.0`
+-   `GLEW`
+-   `OpenGL`
+-   `glm`
+-   `OpenAL` - for later.
+
+On a Debian-based system (like Ubuntu), you can install them with:
 ```bash
-sudo apt-get update
-sudo apt-get install build-essential cmake pkg-config libgtkmm-4.0-dev libglew-dev libglm-dev libopenal-dev cppcheck
+sudo apt-get install build-essential cmake libgtkmm-4.0-dev libglew-dev libglm-dev libopenal-dev
 ```
 
-### Build Steps
+### Build Instructions
 
 ```bash
-# 1. Clone the repository
-git clone <gitlab-repo-url>
-cd <project-directory>
+# Clone the repository
+git clone <your-repo-url>
+cd <your-repo-directory>
 
-# 2. Create and enter a build directory
-mkdir build && cd build
-
-# 3. Configure the project with CMake
+# Configure and build with CMake
+mkdir build
+cd build
 cmake ..
-
-# 4. Compile the project (using all available CPU cores)
 make -j$(nproc)
-
-# 5. (Optional) Run static analysis with cppcheck
-make cppcheck
 ```
 
-## Running the Simulation
+### Running the Simulation
 
-After a successful build, the executable will be located in the `build/GameOfLifeNN` directory.
-
+The executable will be located in the `build/GameOfLifeNN` directory.
 ```bash
-cd build/GameOfLifeNN
-./golnn
+./GameOfLifeNN/golnn
 ```
 
 ## Controls
 
-*   **Move Camera:** `W`, `A`, `S`, `D`
-*   **Sprint Camera:** Hold `Left Shift` while moving
-*   **Look Around:** Hold `Left Mouse Button` and drag the mouse
-*   **Spawn New Agents:** Press `E`
-*   **Spawn New Food:** Press `R`
-*   **Quit:** Press `Esc`
+-   **`W, A, S, D`**: Move the camera forward, left, back, and right.
+-   **`Shift`**: Hold to move the camera faster.
+-   **`LMB + Drag`**: Click and drag the left mouse button to look around.
+-   **`E`**: Spawn 20 new agents at random locations.
+-   **`R`**: Spawn 100 new food items.
+-   **`Esc`**: Close the application.
+

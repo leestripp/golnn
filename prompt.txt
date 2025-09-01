@@ -21,7 +21,9 @@ Represent a vector of Energy, distance to food and distance to Enemy. Then feed 
 Teacher guided training. As we have the States we need. IDLE, HUNT, ROAM and FLEE.
 Increase distance to find food for both Agents to World size * 0.5.
 When Agents reproduce, double check agent count isn't to high (new agents + existing agents > MAX_AGENTS). We had an issue of population explosion at one point.
+Agents:
+* Inputs to the Agents ls3DRNN brai, give.position of food and enemy agents, It works better this way.
+Lets start feeding in the STATE result into the Agent ls3DRNN for better awareness of State.
 
-New changes:
-* Inputs to the Agent ls3DRNN brain. Instead of giveing vector direction, lets switch back to position of food and agents, It did seem to work better.
-Are we currently feeding in the STATE result into the Agent ls3DRNN? If not do so.
+Next task:
+We Need a new Readme.md file for GitLab. Explain features and how the two networks work togeather.
