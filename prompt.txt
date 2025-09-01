@@ -25,5 +25,6 @@ Agents:
 * Inputs to the Agents ls3DRNN brai, give.position of food and enemy agents, It works better this way.
 Lets start feeding in the STATE result into the Agent ls3DRNN for better awareness of State.
 
-Next task:
-We Need a new Readme.md file for GitLab. Explain features and how the two networks work togeather.
+Next change:
+I think the reward system for incresing the learning rate is flawed. We should remove this code.
+Its not working when we increase the learning rate.

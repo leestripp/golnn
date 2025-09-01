@@ -25,14 +25,14 @@ static bool tokenizer_initialized = false;
 
 static void initialize_tokenizer()
 {
-    if(!tokenizer_initialized)
+	if(! tokenizer_initialized)
 	{
-        state_tokenizer.add_token_onehot(static_cast<size_t>(Agent::State::IDLE));
-        state_tokenizer.add_token_onehot(static_cast<size_t>(Agent::State::ROAM));
-        state_tokenizer.add_token_onehot(static_cast<size_t>(Agent::State::HUNT));
-        state_tokenizer.add_token_onehot(static_cast<size_t>(Agent::State::FLEE));
-        tokenizer_initialized = true;
-    }
+		state_tokenizer.add_token_onehot(static_cast<size_t>(Agent::State::IDLE));
+		state_tokenizer.add_token_onehot(static_cast<size_t>(Agent::State::ROAM));
+		state_tokenizer.add_token_onehot(static_cast<size_t>(Agent::State::HUNT));
+		state_tokenizer.add_token_onehot(static_cast<size_t>(Agent::State::FLEE));
+		tokenizer_initialized = true;
+	}
 }
 
 
@@ -49,45 +49,49 @@ Agent::Agent(ls3DRNN brain, const glm::mat4& initial_transform, AgentType type, 
 	m_food_pos(0.0f),
 	m_follow_agent_pos(0.0f),
 	m_threat_pos(0.0f),
-    m_energy_decay_rate(FEEDER_ENERGY_DECAY),
-    m_state_brain(STATE_BRAIN_INPUT_DIM, STATE_BRAIN_HIDDEN_DIM, NUM_STATES, Task::CLASSIFICATION),
-    m_last_state(State::IDLE)
+	m_energy_decay_rate(FEEDER_ENERGY_DECAY),
+	m_state_brain(STATE_BRAIN_INPUT_DIM, STATE_BRAIN_HIDDEN_DIM, NUM_STATES, Task::CLASSIFICATION),
+	m_last_state(State::IDLE)
 {
-    initialize_tokenizer(); // Ensure tokenizer is set up
-
-    // Assign learning rate: random if not provided, otherwise use the given value.
-    if(learning_rate < 0.0f)
-	{
-        m_learning_rate = lr_dist(agent_gen);
-    } else
-	{
-        m_learning_rate = learning_rate;
-    }
+	// Ensure tokenizer is set up
+	initialize_tokenizer();
 	
-    // If initial_energy was not provided (i.e., it's a newly spawned agent, not an offspring),
-    // set the energy based on the agent's type.
-    if (m_energy < 0.0f) {
-        if (m_type == AgentType::PREDATOR) {
-            m_energy = INITIAL_ENERGY * 1.5f;
-        } else {
-            m_energy = INITIAL_ENERGY;
-        }
-    }
-    m_last_energy = m_energy; // Initialize energy tracker
-
-    // Synchronize the brain's internal state with the agent's initial transform.
-    m_brain.set_state(m_transform);
-	
-    // Set initial base color and metabolism based on type
-    if(m_type == AgentType::PREDATOR)
-    {
-        m_base_color = {1.0f, 1.0f, 0.0f}; // Yellow
-        m_energy_decay_rate = PREDATOR_ENERGY_DECAY;
+	// Assign learning rate: random if not provided, otherwise use the given value.
+	if(learning_rate < 0.0f)
+	{
+		m_learning_rate = lr_dist(agent_gen);
+	} else
+	{
+		m_learning_rate = learning_rate;
 	}
-    else // FEEDER
-    {
-        m_base_color = {0.0f, 0.0f, 1.0f}; // Deep Blue
-    }
+	
+	// If initial_energy was not provided (i.e., it's a newly spawned agent, not an offspring),
+	// set the energy based on the agent's type.
+	if(m_energy < 0.0f)
+	{
+		if(m_type == AgentType::PREDATOR)
+		{
+			m_energy = INITIAL_ENERGY * 1.5f;
+		} else
+		{
+			m_energy = INITIAL_ENERGY;
+		}
+	}
+	m_last_energy = m_energy; // Initialize energy tracker
+	
+	// Synchronize the brain's internal state with the agent's initial transform.
+	m_brain.set_state(m_transform);
+	
+	// Set initial base color and metabolism based on type
+	if(m_type == AgentType::PREDATOR)
+	{
+		m_base_color = {1.0f, 1.0f, 0.0f}; // Yellow
+		m_energy_decay_rate = PREDATOR_ENERGY_DECAY;
+	} else
+	{
+		m_base_color = {0.0f, 0.0f, 1.0f}; // Deep Blue
+		m_energy_decay_rate = FEEDER_ENERGY_DECAY;
+	}
 }
 
 // Main update loop for the agent
@@ -97,12 +101,12 @@ void Agent::update(const Simulation& world)
 	m_age++;
 	m_energy -= m_energy_decay_rate;
 	if (isDead()) return;
-
-	// --- Reward Logic for successful eating ---
-	// If the agent was hunting last tick and its energy is higher now than at the start
-	// of the last tick, it means it ate. We reward this by boosting the learning rate.
+	
+	// Reward Logic for successful eating
+	// TODO: I think this is a bad idea, we need to remove it.
 	float effective_learning_rate = m_learning_rate;
-	if (m_last_state == State::HUNT && m_energy > m_last_energy) {
+	if(m_last_state == State::HUNT && m_energy > m_last_energy)
+	{
 		effective_learning_rate *= 5.0f; // Reward: learn 5x faster
 	}
 	m_last_energy = m_energy; // Update energy tracker for next tick's comparison
@@ -289,12 +293,12 @@ std::vector<float> Agent::perceive(const Simulation& world)
 // The "Teacher" - sets the correct state based on the agent's internal world model.
 void Agent::update_state_transitions(const Simulation& /* world */)
 {
-    // Start in IDLE mode
-    State next_state = State::IDLE;
+	// Start in IDLE mode
+	State next_state = State::IDLE;
 	
-    if(m_type == AgentType::FEEDER)
+	if(m_type == AgentType::FEEDER)
 	{
-        if(m_energy < INITIAL_ENERGY)
+		if(m_energy < INITIAL_ENERGY)
 		{
 			// Hungry
 			if(m_threat_pos == glm::vec3(0.0f))
@@ -320,181 +324,181 @@ void Agent::update_state_transitions(const Simulation& /* world */)
 			}
 		}
 		// Prioitise HUNT
-        if(m_energy < INITIAL_ENERGY * 0.75f)
+		if(m_energy < INITIAL_ENERGY * 0.75f)
 		{
 			// Fallback to HUNT
 			next_state = State::HUNT;
 		}
-    } else
+	} else
 	{
-        // Predator Logic
-        // Predators are always hunting if they see prey.
-        if(m_threat_pos != glm::vec3(0.0f))
+		// Predator Logic
+		// Predators are always hunting if they see prey.
+		if(m_threat_pos != glm::vec3(0.0f))
 		{
-            next_state = State::HUNT;
-        } else {
-            next_state = State::ROAM; // Otherwise, roam to find prey.
-        }
-    }
-    m_state = next_state;
+			next_state = State::HUNT;
+		} else {
+			next_state = State::ROAM; // Otherwise, roam to find prey.
+		}
+	}
+	m_state = next_state;
 }
 
 
 // Teacher-forcing for the movement brain
 void Agent::train_brain(const Simulation& /* world */, const std::vector<float>& perception_vector, float learning_rate) {
-    glm::vec3 target_pos(0.0f);
-    bool has_target = false;
+	glm::vec3 target_pos(0.0f);
+	bool has_target = false;
 
-    // Determine target based on state
-    switch (m_state) {
-        case State::HUNT:
-            target_pos = (m_type == AgentType::FEEDER) ? m_food_pos : m_threat_pos;
-            has_target = true;
-            break;
-        case State::FLEE:
-            target_pos = m_threat_pos;
-            has_target = true;
-            break;
-        case State::ROAM:
-            target_pos = m_follow_agent_pos;
-            has_target = (target_pos != glm::vec3(0.0f));
-            break;
-        case State::IDLE:
-        default:
-            break; // No specific target
-    }
+	// Determine target based on state
+	switch (m_state) {
+		case State::HUNT:
+			target_pos = (m_type == AgentType::FEEDER) ? m_food_pos : m_threat_pos;
+			has_target = true;
+			break;
+		case State::FLEE:
+			target_pos = m_threat_pos;
+			has_target = true;
+			break;
+		case State::ROAM:
+			target_pos = m_follow_agent_pos;
+			has_target = (target_pos != glm::vec3(0.0f));
+			break;
+		case State::IDLE:
+		default:
+			break; // No specific target
+	}
 
-    glm::vec3 agent_pos = m_transform[3];
-    glm::vec3 agent_fwd = glm::normalize(glm::vec3(m_transform[2]));
+	glm::vec3 agent_pos = m_transform[3];
+	glm::vec3 agent_fwd = glm::normalize(glm::vec3(m_transform[2]));
 
-    // --- Calculate Ideal Delta Transform ---
-    glm::vec3 desired_translation(0.0f);
-    glm::quat desired_rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f); // Identity
+	// --- Calculate Ideal Delta Transform ---
+	glm::vec3 desired_translation(0.0f);
+	glm::quat desired_rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f); // Identity
 
-    if (has_target && target_pos != glm::vec3(0.0f)) {
-        glm::vec3 dir_to_target = target_pos - agent_pos;
-        if (glm::length2(dir_to_target) > 1e-6f) {
-            dir_to_target = glm::normalize(dir_to_target);
-            if (m_state == State::FLEE) {
-                dir_to_target = -dir_to_target; // Flee in the opposite direction
-            }
-            desired_translation = dir_to_target * MAX_SPEED;
-            
-            // Smoothly rotate towards the target direction
-            glm::quat target_rot = glm::rotation(agent_fwd, dir_to_target);
-            desired_rotation = glm::slerp(glm::quat(1.0f, 0.0f, 0.0f, 0.0f), target_rot, ROTATION_LERP_FACTOR);
-        }
+	if (has_target && target_pos != glm::vec3(0.0f)) {
+		glm::vec3 dir_to_target = target_pos - agent_pos;
+		if (glm::length2(dir_to_target) > 1e-6f) {
+			dir_to_target = glm::normalize(dir_to_target);
+			if (m_state == State::FLEE) {
+				dir_to_target = -dir_to_target; // Flee in the opposite direction
+			}
+			desired_translation = dir_to_target * MAX_SPEED;
+			
+			// Smoothly rotate towards the target direction
+			glm::quat target_rot = glm::rotation(agent_fwd, dir_to_target);
+			desired_rotation = glm::slerp(glm::quat(1.0f, 0.0f, 0.0f, 0.0f), target_rot, ROTATION_LERP_FACTOR);
+		}
 
-    } else { // IDLE or ROAM without a follow target
-        // Just move forward slowly
-        desired_translation = agent_fwd * (MAX_SPEED * 0.2f);
-    }
+	} else { // IDLE or ROAM without a follow target
+		// Just move forward slowly
+		desired_translation = agent_fwd * (MAX_SPEED * 0.2f);
+	}
 
-    // --- Create Target Parameter Vector ---
-    std::vector<float> target_params(7);
-    target_params[0] = desired_translation.x;
-    target_params[1] = desired_translation.y;
-    target_params[2] = desired_translation.z;
-    target_params[3] = desired_rotation.x;
-    target_params[4] = desired_rotation.y;
-    target_params[5] = desired_rotation.z;
-    target_params[6] = desired_rotation.w;
+	// --- Create Target Parameter Vector ---
+	std::vector<float> target_params(7);
+	target_params[0] = desired_translation.x;
+	target_params[1] = desired_translation.y;
+	target_params[2] = desired_translation.z;
+	target_params[3] = desired_rotation.x;
+	target_params[4] = desired_rotation.y;
+	target_params[5] = desired_rotation.z;
+	target_params[6] = desired_rotation.w;
 
-    // --- Train the Brain ---
-    m_brain.train_step(perception_vector, target_params, learning_rate, ROTATION_WEIGHT);
+	// --- Train the Brain ---
+	m_brain.train_step(perception_vector, target_params, learning_rate, ROTATION_WEIGHT);
 }
 
 
 // New function to train the state-selection RNN
 void Agent::train_state_brain(const Simulation& /* world */)
 {
-    // 1. Create input vector for the state brain.
-    std::vector<double> state_brain_input_vec;
-    state_brain_input_vec.reserve(STATE_BRAIN_INPUT_DIM);
+	// 1. Create input vector for the state brain.
+	std::vector<double> state_brain_input_vec;
+	state_brain_input_vec.reserve(STATE_BRAIN_INPUT_DIM);
 
-    // --- Part A: Energy Input (One-hot encoded bin) ---
-    std::vector<double> energy_input_vec(NUM_ENERGY_BINS, 0.0);
-    float max_energy = (m_type == AgentType::PREDATOR) ? PREDATOR_ENERGY_TO_REPRODUCE : FEEDER_ENERGY_TO_REPRODUCE;
-    float energy_ratio = std::clamp(m_energy / max_energy, 0.0f, 1.0f);
-    // Ensure the bin index is within bounds [0, NUM_ENERGY_BINS - 1]
-    int energy_bin_index = static_cast<int>(energy_ratio * (NUM_ENERGY_BINS - 0.0001f));
-    energy_input_vec[energy_bin_index] = 1.0;
-    state_brain_input_vec.insert(state_brain_input_vec.end(), energy_input_vec.begin(), energy_input_vec.end());
+	// --- Part A: Energy Input (One-hot encoded bin) ---
+	std::vector<double> energy_input_vec(NUM_ENERGY_BINS, 0.0);
+	float max_energy = (m_type == AgentType::PREDATOR) ? PREDATOR_ENERGY_TO_REPRODUCE : FEEDER_ENERGY_TO_REPRODUCE;
+	float energy_ratio = std::clamp(m_energy / max_energy, 0.0f, 1.0f);
+	// Ensure the bin index is within bounds [0, NUM_ENERGY_BINS - 1]
+	int energy_bin_index = static_cast<int>(energy_ratio * (NUM_ENERGY_BINS - 0.0001f));
+	energy_input_vec[energy_bin_index] = 1.0;
+	state_brain_input_vec.insert(state_brain_input_vec.end(), energy_input_vec.begin(), energy_input_vec.end());
 
-    // --- Part B: Distance to Enemy Input (One-hot encoded bin) ---
-    std::vector<double> distance_input_vec(NUM_DISTANCE_BINS, 0.0);
-    float distance_to_threat = std::numeric_limits<float>::max();
+	// --- Part B: Distance to Enemy Input (One-hot encoded bin) ---
+	std::vector<double> distance_input_vec(NUM_DISTANCE_BINS, 0.0);
+	float distance_to_threat = std::numeric_limits<float>::max();
 
-    if (m_threat_pos != glm::vec3(0.0f)) {
-        distance_to_threat = glm::distance(glm::vec3(m_transform[3]), m_threat_pos);
-    }
+	if (m_threat_pos != glm::vec3(0.0f)) {
+		distance_to_threat = glm::distance(glm::vec3(m_transform[3]), m_threat_pos);
+	}
 
-    float max_detection_radius = (m_type == AgentType::FEEDER) ? 
-                                 sqrt(PREDATOR_DETECTION_RADIUS_SQ) : 
-                                 sqrt(PREDATOR_HUNT_RADIUS_SQ);
-    
-    float distance_ratio = std::clamp(distance_to_threat / max_detection_radius, 0.0f, 1.0f);
-    int distance_bin_index = static_cast<int>(distance_ratio * (NUM_DISTANCE_BINS - 0.0001f));
-    distance_input_vec[distance_bin_index] = 1.0;
-    state_brain_input_vec.insert(state_brain_input_vec.end(), distance_input_vec.begin(), distance_input_vec.end());
+	float max_detection_radius = (m_type == AgentType::FEEDER) ? 
+								 sqrt(PREDATOR_DETECTION_RADIUS_SQ) : 
+								 sqrt(PREDATOR_HUNT_RADIUS_SQ);
+	
+	float distance_ratio = std::clamp(distance_to_threat / max_detection_radius, 0.0f, 1.0f);
+	int distance_bin_index = static_cast<int>(distance_ratio * (NUM_DISTANCE_BINS - 0.0001f));
+	distance_input_vec[distance_bin_index] = 1.0;
+	state_brain_input_vec.insert(state_brain_input_vec.end(), distance_input_vec.begin(), distance_input_vec.end());
 
-    // --- Part C: Distance to Food Input (One-hot encoded bin) ---
-    std::vector<double> food_distance_input_vec(NUM_FOOD_DISTANCE_BINS, 0.0);
-    float distance_to_food = std::numeric_limits<float>::max();
+	// --- Part C: Distance to Food Input (One-hot encoded bin) ---
+	std::vector<double> food_distance_input_vec(NUM_FOOD_DISTANCE_BINS, 0.0);
+	float distance_to_food = std::numeric_limits<float>::max();
 
-    if (m_food_pos != glm::vec3(0.0f)) {
-        distance_to_food = glm::distance(glm::vec3(m_transform[3]), m_food_pos);
-    }
-    
-    // Use a general detection radius for food. PREDATOR_DETECTION_RADIUS_SQ is a good general "far" distance.
-    float max_food_detection_radius = sqrt(FEEDER_FOOD_DETECTION_RADIUS_SQ);
-    float food_distance_ratio = std::clamp(distance_to_food / max_food_detection_radius, 0.0f, 1.0f);
-    int food_distance_bin_index = static_cast<int>(food_distance_ratio * (NUM_FOOD_DISTANCE_BINS - 0.0001f));
-    food_distance_input_vec[food_distance_bin_index] = 1.0;
-    state_brain_input_vec.insert(state_brain_input_vec.end(), food_distance_input_vec.begin(), food_distance_input_vec.end());
+	if (m_food_pos != glm::vec3(0.0f)) {
+		distance_to_food = glm::distance(glm::vec3(m_transform[3]), m_food_pos);
+	}
+	
+	// Use a general detection radius for food. PREDATOR_DETECTION_RADIUS_SQ is a good general "far" distance.
+	float max_food_detection_radius = sqrt(FEEDER_FOOD_DETECTION_RADIUS_SQ);
+	float food_distance_ratio = std::clamp(distance_to_food / max_food_detection_radius, 0.0f, 1.0f);
+	int food_distance_bin_index = static_cast<int>(food_distance_ratio * (NUM_FOOD_DISTANCE_BINS - 0.0001f));
+	food_distance_input_vec[food_distance_bin_index] = 1.0;
+	state_brain_input_vec.insert(state_brain_input_vec.end(), food_distance_input_vec.begin(), food_distance_input_vec.end());
 
-    // 2. Get the one-hot target vector for the current "correct" state.
-    size_t target_state_id = static_cast<size_t>(m_state);
-    const auto& target_state_vec = state_tokenizer.find_vector(target_state_id);
+	// 2. Get the one-hot target vector for the current "correct" state.
+	size_t target_state_id = static_cast<size_t>(m_state);
+	const auto& target_state_vec = state_tokenizer.find_vector(target_state_id);
 
-    // 3. Perform a training step.
-    m_state_brain.reset_state();
-    std::vector<std::vector<double>> inputs_sequence = { state_brain_input_vec };
-    std::vector<double> predicted_output = m_state_brain.forward_pass(state_brain_input_vec);
-    std::vector<std::vector<double>> outputs_sequence = { predicted_output };
-    std::vector<std::vector<double>> expected_sequence = { target_state_vec };
-    m_state_brain.backpropagate(inputs_sequence, outputs_sequence, expected_sequence, m_learning_rate);
+	// 3. Perform a training step.
+	m_state_brain.reset_state();
+	std::vector<std::vector<double>> inputs_sequence = { state_brain_input_vec };
+	std::vector<double> predicted_output = m_state_brain.forward_pass(state_brain_input_vec);
+	std::vector<std::vector<double>> outputs_sequence = { predicted_output };
+	std::vector<std::vector<double>> expected_sequence = { target_state_vec };
+	m_state_brain.backpropagate(inputs_sequence, outputs_sequence, expected_sequence, m_learning_rate);
 }
 
 bool Agent::isDead() const {
-    return m_energy <= 0.0f || m_age > MAX_AGE;
+	return m_energy <= 0.0f || m_age > MAX_AGE;
 }
 
 bool Agent::canReproduce() const {
-    if (m_type == AgentType::PREDATOR) {
-        return m_energy >= PREDATOR_ENERGY_TO_REPRODUCE;
-    } else {
-        return m_energy >= FEEDER_ENERGY_TO_REPRODUCE;
-    }
+	if (m_type == AgentType::PREDATOR) {
+		return m_energy >= PREDATOR_ENERGY_TO_REPRODUCE;
+	} else {
+		return m_energy >= FEEDER_ENERGY_TO_REPRODUCE;
+	}
 }
 
 Agent Agent::reproduce() {
-    // Halve parent's energy for the child
-    m_energy /= 2.0f;
-    float child_energy = m_energy;
+	// Halve parent's energy for the child
+	m_energy /= 2.0f;
+	float child_energy = m_energy;
 
-    // Create a copy of the parent's brain
-    ls3DRNN child_brain = m_brain;
+	// Create a copy of the parent's brain
+	ls3DRNN child_brain = m_brain;
 
-    // Mutate the child's brain
-    child_brain.mutate(MUTATION_RATE, MUTATION_AMOUNT);
+	// Mutate the child's brain
+	child_brain.mutate(MUTATION_RATE, MUTATION_AMOUNT);
 
-    // Child spawns at parent's location
-    glm::mat4 child_transform = m_transform;
+	// Child spawns at parent's location
+	glm::mat4 child_transform = m_transform;
 
-    // Create the new agent. Learning rate is randomized by passing -1.
-    Agent child(std::move(child_brain), child_transform, m_type, -1.0f, child_energy);
-    
-    // The child's state brain is newly initialized, it will learn on its own.
-    return child;
+	// Create the new agent. Learning rate is randomized by passing -1.
+	Agent child(std::move(child_brain), child_transform, m_type, -1.0f, child_energy);
+	
+	// The child's state brain is newly initialized, it will learn on its own.
+	return child;
 }
