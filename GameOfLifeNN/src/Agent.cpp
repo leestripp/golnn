@@ -91,198 +91,200 @@ Agent::Agent(ls3DRNN brain, const glm::mat4& initial_transform, AgentType type, 
 }
 
 // Main update loop for the agent
-void Agent::update(const Simulation& world) {
-    // 1. Basic housekeeping: age and decay energy
-    m_age++;
-    m_energy -= m_energy_decay_rate;
-    if (isDead()) return;
+void Agent::update(const Simulation& world)
+{
+	// 1. Basic housekeeping: age and decay energy
+	m_age++;
+	m_energy -= m_energy_decay_rate;
+	if (isDead()) return;
 
-    // --- Reward Logic for successful eating ---
-    // If the agent was hunting last tick and its energy is higher now than at the start
-    // of the last tick, it means it ate. We reward this by boosting the learning rate.
-    float effective_learning_rate = m_learning_rate;
-    if (m_last_state == State::HUNT && m_energy > m_last_energy) {
-        effective_learning_rate *= 5.0f; // Reward: learn 5x faster
-    }
-    m_last_energy = m_energy; // Update energy tracker for next tick's comparison
+	// --- Reward Logic for successful eating ---
+	// If the agent was hunting last tick and its energy is higher now than at the start
+	// of the last tick, it means it ate. We reward this by boosting the learning rate.
+	float effective_learning_rate = m_learning_rate;
+	if (m_last_state == State::HUNT && m_energy > m_last_energy) {
+		effective_learning_rate *= 5.0f; // Reward: learn 5x faster
+	}
+	m_last_energy = m_energy; // Update energy tracker for next tick's comparison
 
-    m_prev_transform = m_transform;
+	m_prev_transform = m_transform;
 
-    // 2. Perceive the world, build the movement brain input vector, and update internal world model
-    std::vector<float> perception_vector = perceive(world);
+	// 2. Perceive the world, build the movement brain input vector, and update internal world model
+	std::vector<float> perception_vector = perceive(world);
 
-    // 3. Determine the "correct" state based on rules (Teacher)
-    update_state_transitions(world);
-    m_last_state = m_state; // Update state tracker for next tick's reward check
+	// 3. Determine the "correct" state based on rules (Teacher)
+	update_state_transitions(world);
+	m_last_state = m_state; // Update state tracker for next tick's reward check
 
-    // 4. Train the state-selection brain to predict the correct state
-    train_state_brain(world);
+	// 4. Train the state-selection brain to predict the correct state
+	train_state_brain(world);
 
-    // 5. Train the movement brain based on the correct state
-    train_brain(world, perception_vector, effective_learning_rate);
+	// --- NEW: Add current state to the perception vector for the movement brain ---
+	// The perception vector is size 17. Indices 13, 14, 15, 16 are for state.
+	// We create a one-hot encoding of the current state.
+	perception_vector[13] = (m_state == State::IDLE) ? 1.0f : 0.0f;
+	perception_vector[14] = (m_state == State::ROAM) ? 1.0f : 0.0f;
+	perception_vector[15] = (m_state == State::HUNT) ? 1.0f : 0.0f;
+	perception_vector[16] = (m_state == State::FLEE) ? 1.0f : 0.0f;
 
-    // 6. Get the next action from the movement brain and update transform
-    m_transform = m_brain.process_step(perception_vector);
+	// 5. Train the movement brain based on the correct state
+	train_brain(world, perception_vector, effective_learning_rate);
 
-    // 7. Enforce world boundaries
-    glm::vec3 current_pos = m_transform[3];
-    float half_world_size = world.m_world_size / 2.0f;
-    current_pos.x = std::clamp(current_pos.x, -half_world_size, half_world_size);
-    current_pos.y = std::clamp(current_pos.y, -half_world_size, half_world_size);
-    current_pos.z = std::clamp(current_pos.z, -half_world_size, half_world_size);
-    m_transform[3] = glm::vec4(current_pos, 1.0f);
-    m_brain.set_state(m_transform); // Keep brain state in sync after clamping
+	// 6. Get the next action from the movement brain and update transform
+	m_transform = m_brain.process_step(perception_vector);
 
-    // 8. Update color based on energy
-    float max_energy = (m_type == AgentType::PREDATOR) ? PREDATOR_ENERGY_TO_REPRODUCE : FEEDER_ENERGY_TO_REPRODUCE;
-    float energy_factor = std::clamp(m_energy / max_energy, 0.1f, 1.0f); // Clamp to avoid being invisible
-    m_color = m_base_color * energy_factor;
+	// 7. Enforce world boundaries
+	glm::vec3 current_pos = m_transform[3];
+	float half_world_size = world.m_world_size / 2.0f;
+	current_pos.x = std::clamp(current_pos.x, -half_world_size, half_world_size);
+	current_pos.y = std::clamp(current_pos.y, -half_world_size, half_world_size);
+	current_pos.z = std::clamp(current_pos.z, -half_world_size, half_world_size);
+	m_transform[3] = glm::vec4(current_pos, 1.0f);
+	m_brain.set_state(m_transform); // Keep brain state in sync after clamping
+
+	// 8. Update color based on energy
+	float max_energy = (m_type == AgentType::PREDATOR) ? PREDATOR_ENERGY_TO_REPRODUCE : FEEDER_ENERGY_TO_REPRODUCE;
+	float energy_factor = std::clamp(m_energy / max_energy, 0.1f, 1.0f); // Clamp to avoid being invisible
+	m_color = m_base_color * energy_factor;
 }
 
 // Gathers sensory information, prepares the input vector for the movement RNN,
 // and updates the agent's internal world model (m_food_pos, m_threat_pos, etc.).
-std::vector<float> Agent::perceive(const Simulation& world) {
-    // Reset internal world model
-    m_food_pos = glm::vec3(0.0f);
-    m_follow_agent_pos = glm::vec3(0.0f);
-    m_threat_pos = glm::vec3(0.0f);
+std::vector<float> Agent::perceive(const Simulation& world)
+{
+	// Reset internal world model
+	m_food_pos = glm::vec3(0.0f);
+	m_follow_agent_pos = glm::vec3(0.0f);
+	m_threat_pos = glm::vec3(0.0f);
 
-    std::vector<float> perception(13, 0.0f); // 4 for food, 4 for follow, 4 for threat, 1 for energy
+	// The vector now has space for the state, which will be added in update()
+	std::vector<float> perception(17, 0.0f); // 4 food, 4 follow, 4 threat, 1 energy, 4 state
 
-    glm::vec3 agent_pos = m_transform[3];
-    glm::mat3 agent_rot_inv = glm::inverse(glm::mat3(m_transform));
-
-    // --- Find Targets ---
-    glm::vec3 closest_food_pos(0.0f);
-    glm::vec3 closest_follow_pos(0.0f);
-    glm::vec3 closest_threat_pos(0.0f);
-    float min_food_dist_sq = std::numeric_limits<float>::max();
-    float min_follow_dist_sq = ROAM_FOLLOW_RADIUS_SQ;
-    float min_threat_dist_sq = std::numeric_limits<float>::max();
-    bool found_threat = false;
-    bool found_follow = false;
-    bool found_food = false;
-
-    // --- Predator-specific prey tracking ---
-    glm::vec3 closest_feeder_prey_pos(0.0f);
-    glm::vec3 closest_predator_prey_pos(0.0f);
-    float min_feeder_prey_dist_sq = std::numeric_limits<float>::max();
-    float min_predator_prey_dist_sq = std::numeric_limits<float>::max();
-    bool found_feeder_prey = false;
-    bool found_predator_prey = false;
-
-    // Find closest food (for feeders)
-    if (m_type == AgentType::FEEDER) {
-        for (const auto& food : world.m_food) {
-            float dist_sq = glm::distance2(agent_pos, food.position);
-            if (dist_sq < FEEDER_FOOD_DETECTION_RADIUS_SQ && dist_sq < min_food_dist_sq) {
-                min_food_dist_sq = dist_sq;
-                closest_food_pos = food.position;
-                found_food = true;
-            }
-        }
-    }
-
-    // Find closest agents (threat, follow, prey)
-    for (const auto& other : world.m_agents) {
-        if (&other == this) continue;
-        glm::vec3 other_pos = other.m_transform[3];
-        float dist_sq = glm::distance2(agent_pos, other_pos);
-
-        if (m_type == AgentType::FEEDER) {
-            // Feeder looks for predators (threat) and other feeders (follow)
-            if (other.m_type == AgentType::PREDATOR && dist_sq < PREDATOR_DETECTION_RADIUS_SQ) {
-                if (dist_sq < min_threat_dist_sq) {
-                    min_threat_dist_sq = dist_sq;
-                    closest_threat_pos = other_pos;
-                    found_threat = true;
-                }
-            } else if (other.m_type == AgentType::FEEDER && dist_sq < min_follow_dist_sq) {
-                min_follow_dist_sq = dist_sq;
-                closest_follow_pos = other_pos;
-                found_follow = true;
-            }
-        } else { // PREDATOR
-            // Predator looks for prey, prioritizing feeders
-            if (dist_sq < PREDATOR_HUNT_RADIUS_SQ) {
-                if (other.m_type == AgentType::FEEDER) {
-                    if (dist_sq < min_feeder_prey_dist_sq) {
-                        min_feeder_prey_dist_sq = dist_sq;
-                        closest_feeder_prey_pos = other_pos;
-                        found_feeder_prey = true;
-                    }
-                } else if (other.m_type == AgentType::PREDATOR) {
-                    if (dist_sq < min_predator_prey_dist_sq) {
-                        min_predator_prey_dist_sq = dist_sq;
-                        closest_predator_prey_pos = other_pos;
-                        found_predator_prey = true;
-                    }
-                }
-            }
-        }
-    }
+	glm::vec3 agent_pos = m_transform[3];
 	
-    // --- Predator prey selection logic ---
-    if (m_type == AgentType::PREDATOR) {
-        if (found_feeder_prey) {
-            closest_threat_pos = closest_feeder_prey_pos;
-            found_threat = true;
-        } else if (found_predator_prey) {
-            closest_threat_pos = closest_predator_prey_pos;
-            found_threat = true;
-        }
-    }
+	// Dynamic detection radius based on world size
+	const float detection_radius = world.m_world_size * 0.5f;
+	const float detection_radius_sq = detection_radius * detection_radius;
 
-    // --- Update Internal World Model ---
-    if (found_food) m_food_pos = closest_food_pos;
-    if (found_follow) m_follow_agent_pos = closest_follow_pos;
-    if (found_threat) m_threat_pos = closest_threat_pos;
+	// --- Find Targets ---
+	glm::vec3 closest_food_pos(0.0f);
+	glm::vec3 closest_follow_pos(0.0f);
+	glm::vec3 closest_threat_pos(0.0f);
+	float min_food_dist_sq = std::numeric_limits<float>::max();
+	float min_follow_dist_sq = ROAM_FOLLOW_RADIUS_SQ; // Roaming is short-range, keep it fixed.
+	float min_threat_dist_sq = std::numeric_limits<float>::max();
+	bool found_threat = false;
+	bool found_follow = false;
+	bool found_food = false;
 
-    // --- Fill Perception Vector for Movement Brain (Direction & Distance) ---
-    // Food
-    if (found_food) {
-        glm::vec3 dir_to_food = closest_food_pos - agent_pos;
-        float dist = glm::length(dir_to_food);
-        if (dist > 1e-6f) {
-            glm::vec3 local_dir = agent_rot_inv * glm::normalize(dir_to_food);
-            perception[0] = local_dir.x;
-            perception[1] = local_dir.y;
-            perception[2] = local_dir.z;
-        }
-        perception[3] = dist;
-    }
+	// --- Predator-specific prey tracking ---
+	glm::vec3 closest_feeder_prey_pos(0.0f);
+	glm::vec3 closest_predator_prey_pos(0.0f);
+	float min_feeder_prey_dist_sq = std::numeric_limits<float>::max();
+	float min_predator_prey_dist_sq = std::numeric_limits<float>::max();
+	bool found_feeder_prey = false;
+	bool found_predator_prey = false;
 
-    // Follow Agent
-    if (found_follow) {
-        glm::vec3 dir_to_follow = closest_follow_pos - agent_pos;
-        float dist = glm::length(dir_to_follow);
-        if (dist > 1e-6f) {
-            glm::vec3 local_dir = agent_rot_inv * glm::normalize(dir_to_follow);
-            perception[4] = local_dir.x;
-            perception[5] = local_dir.y;
-            perception[6] = local_dir.z;
-        }
-        perception[7] = dist;
-    }
+	// Find closest food (for feeders)
+	if (m_type == AgentType::FEEDER) {
+		for (const auto& food : world.m_food) {
+			float dist_sq = glm::distance2(agent_pos, food.position);
+			if (dist_sq < detection_radius_sq && dist_sq < min_food_dist_sq) {
+				min_food_dist_sq = dist_sq;
+				closest_food_pos = food.position;
+				found_food = true;
+			}
+		}
+	}
 
-    // Threat/Prey Agent
-    if (found_threat) {
-        glm::vec3 dir_to_threat = closest_threat_pos - agent_pos;
-        float dist = glm::length(dir_to_threat);
-        if (dist > 1e-6f) {
-            glm::vec3 local_dir = agent_rot_inv * glm::normalize(dir_to_threat);
-            perception[8] = local_dir.x;
-            perception[9] = local_dir.y;
-            perception[10] = local_dir.z;
-        }
-        perception[11] = dist;
-    }
+	// Find closest agents (threat, follow, prey)
+	for (const auto& other : world.m_agents) {
+		if (&other == this) continue;
+		glm::vec3 other_pos = other.m_transform[3];
+		float dist_sq = glm::distance2(agent_pos, other_pos);
 
-    // Own Energy
-    perception[12] = m_energy / 100.0f; // Normalize energy
+		if (m_type == AgentType::FEEDER) {
+			// Feeder looks for predators (threat) and other feeders (follow)
+			if (other.m_type == AgentType::PREDATOR && dist_sq < detection_radius_sq) {
+				if (dist_sq < min_threat_dist_sq) {
+					min_threat_dist_sq = dist_sq;
+					closest_threat_pos = other_pos;
+					found_threat = true;
+				}
+			} else if (other.m_type == AgentType::FEEDER && dist_sq < min_follow_dist_sq) {
+				min_follow_dist_sq = dist_sq;
+				closest_follow_pos = other_pos;
+				found_follow = true;
+			}
+		} else { // PREDATOR
+			// Predator looks for prey, prioritizing feeders
+			if (dist_sq < detection_radius_sq) {
+				if (other.m_type == AgentType::FEEDER) {
+					if (dist_sq < min_feeder_prey_dist_sq) {
+						min_feeder_prey_dist_sq = dist_sq;
+						closest_feeder_prey_pos = other_pos;
+						found_feeder_prey = true;
+					}
+				} else if (other.m_type == AgentType::PREDATOR) {
+					if (dist_sq < min_predator_prey_dist_sq) {
+						min_predator_prey_dist_sq = dist_sq;
+						closest_predator_prey_pos = other_pos;
+						found_predator_prey = true;
+					}
+				}
+			}
+		}
+	}
+	
+	// --- Predator prey selection logic ---
+	if (m_type == AgentType::PREDATOR) {
+		if (found_feeder_prey) {
+			closest_threat_pos = closest_feeder_prey_pos;
+			min_threat_dist_sq = min_feeder_prey_dist_sq;
+			found_threat = true;
+		} else if (found_predator_prey) {
+			closest_threat_pos = closest_predator_prey_pos;
+			min_threat_dist_sq = min_predator_prey_dist_sq;
+			found_threat = true;
+		}
+	}
 
-    return perception;
+	// --- Update Internal World Model ---
+	if (found_food) m_food_pos = closest_food_pos;
+	if (found_follow) m_follow_agent_pos = closest_follow_pos;
+	if (found_threat) m_threat_pos = closest_threat_pos;
+
+	// --- Fill Perception Vector for Movement Brain (World Position & Distance) ---
+	// Food
+	if (found_food) {
+		perception[0] = closest_food_pos.x;
+		perception[1] = closest_food_pos.y;
+		perception[2] = closest_food_pos.z;
+		perception[3] = sqrt(min_food_dist_sq);
+	}
+
+	// Follow Agent
+	if (found_follow) {
+		perception[4] = closest_follow_pos.x;
+		perception[5] = closest_follow_pos.y;
+		perception[6] = closest_follow_pos.z;
+		perception[7] = sqrt(min_follow_dist_sq);
+	}
+
+	// Threat/Prey Agent
+	if (found_threat) {
+		perception[8] = closest_threat_pos.x;
+		perception[9] = closest_threat_pos.y;
+		perception[10] = closest_threat_pos.z;
+		perception[11] = sqrt(min_threat_dist_sq);
+	}
+
+	// Own Energy
+	perception[12] = m_energy / 100.0f; // Normalize energy
+
+	return perception;
 }
+
 
 // The "Teacher" - sets the correct state based on the agent's internal world model.
 void Agent::update_state_transitions(const Simulation& /* world */)

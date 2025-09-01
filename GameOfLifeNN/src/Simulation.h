@@ -22,7 +22,6 @@ public:
 
     // Spawns a specified number of new agents during runtime
     void spawn_new_agents(size_t count);
-	
     // Spawns a specified number of new food items during runtime
     void spawn_new_food(size_t count, float food_area_scale = 0.8f);
 	
@@ -52,8 +51,8 @@ private:
 	// Predation is now a direct energy transfer. The drain from prey equals the gain for the predator.
 	static constexpr float PREDATION_ENERGY_TRANSFER = 40.0f;	// Energy transferred from prey to predator
 	// Limits
-	static constexpr size_t MAX_AGENTS = 2000;
-	static constexpr size_t MAX_FOOD = 2000;
+	static constexpr size_t MAX_AGENTS = 1000;
+	static constexpr size_t MAX_FOOD = 1000;
 };
 
 #endif // SIMULATION_H

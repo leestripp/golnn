@@ -3,7 +3,6 @@ Artificial Life Simulation in C++ & OpenGL. gtkmm4 for the window.
 ls3DRNN: Used for movement in 3D space.
 * When Agents spawn, we should give them random amounts of neurons. We would need a MAX_LAYER_COUNT and MAX_NEURON_COUNT, so we don't have brains to large.
 * When an Agent replicates, the child will get the parents brain with a small mutation.
-* Inputs to the Agent brain. Instead of giveing position to food and agents, lets give a vector (direction) and distance.
 When the last Agent dies, we should output its Agent type, hidden layer count and neuron cunt per layer. So we can track the Alpha Agent settings.
 Agent types:
 * Preditor : These agents drain the energy from other agents.
@@ -15,11 +14,14 @@ Colours: Only set base colours, then adjust based on energy level. Bright = high
 Predators Base Colour : Yellow (1.0f, 1.0f, 0.0f)
 Feeders Base Colour : Deep Blue (0.0f, 0.0f, 1.0f)
 Predators should eat each other if there isn't a Feeder to eat.
-When Agents reproduce, double check the energy level isn't to high. We had an issue of population explosion at one point.
 ls3DRNN: Is working DO NOT modify it.
 I've added lsRNN, to pick states based on Energy Level, distance to food and distance to enemy (predator).
 lsRNN: Used to choose the STATE an agent is in.
 Represent a vector of Energy, distance to food and distance to Enemy. Then feed it to m_state_brain lsRNN, from this we choose a STATE for the Agent.
 Teacher guided training. As we have the States we need. IDLE, HUNT, ROAM and FLEE.
+Increase distance to find food for both Agents to World size * 0.5.
+When Agents reproduce, double check agent count isn't to high (new agents + existing agents > MAX_AGENTS). We had an issue of population explosion at one point.
 
-Increase distance to find food.
+New changes:
+* Inputs to the Agent ls3DRNN brain. Instead of giveing vector direction, lets switch back to position of food and agents, It did seem to work better.
+Are we currently feeding in the STATE result into the Agent ls3DRNN? If not do so.
