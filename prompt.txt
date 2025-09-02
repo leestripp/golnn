@@ -35,6 +35,6 @@ If the Feeder agent is outside, Adjust the position of the MEAT (food) to be ins
 Another version bump.
 
 Next step:
-Now we need a new Part 2 script for a podcast, to be performed by the Notebook LM podcast Audio Overview. Remember to start off by saying how Lee Stripp and Gemini 2.5 Pro worked on this project together.
-Once the human started to understand how the AI needed him to keep the old prompt as part of the full prompt the whole process went much more smoothly.
-Talk about all the great features in this new version.
+ls3DRNN:
+We need to change how Teacher Forcing works. I'm thinking we chould now use sencors to find food direction and distance. Create a function to find food by TYPE based on Agent current position. It needs to be flexable to support both Types of agent. The function will return a normalized direction vector of the food. Now the key part, the ls3DRNN will only be taught the direction of the food, NOT the exact position.
+This should be more like the real world.
