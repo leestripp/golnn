@@ -9,22 +9,29 @@ Agent types:
 * Feeder: Standard agents, flee from Preditor aagents, feed and rest.
 Feeder Feeding distance: feeders must be closer then 1 unit from food to eat. But detect food 20 units away.
 Predator eating distance: predators must be closer the 1 unit from feeder agents to eat. But can detect them from 20 units away.
-Random learning rates: Between 0.01 and 0.0005, to add more variation.
+Initial Random learning rates: Between 0.01 and 0.0005, to add more variation.
 Colours: Only set base colours, then adjust based on energy level. Bright = high energy. dark = low energy, as a factor.
 Predators Base Colour : Yellow (1.0f, 1.0f, 0.0f)
 Feeders Base Colour : Deep Blue (0.0f, 0.0f, 1.0f)
 Predators should eat each other if there isn't a Feeder to eat.
+Increase distance to find food for both Agents to World size * 0.5.
 ls3DRNN: Is working DO NOT modify it.
+
+lsRNN:
 I've added lsRNN, to pick states based on Energy Level, distance to food and distance to enemy (predator).
 lsRNN: Used to choose the STATE an agent is in.
+lsRNN: We should use a random number of Neurons, 4 ~ 32. For initial creation.
 Represent a vector of Energy, distance to food and distance to Enemy. Then feed it to m_state_brain lsRNN, from this we choose a STATE for the Agent.
 Teacher guided training. As we have the States we need. IDLE, HUNT, ROAM and FLEE.
-Increase distance to find food for both Agents to World size * 0.5.
 When Agents reproduce, double check agent count isn't to high (new agents + existing agents > MAX_AGENTS). We had an issue of population explosion at one point.
 Agents:
 * Inputs to the Agents ls3DRNN brai, give.position of food and enemy agents, It works better this way.
 Lets start feeding in the STATE result into the Agent ls3DRNN for better awareness of State.
 
 Next change:
-I think the reward system for incresing the learning rate is flawed. We should remove this code.
-Its not working when we increase the learning rate.
+struct Food {
+	size_t m_food_type;
+    glm::vec3 position;
+};
+When a Feeder Agent dies, it will leave different food behind. m_food_type. That Predators can eat.
+We need to add food types. vegitable, meat. So feeders can only eat Vegies, Predators can only eat Meat and Feeder agents.

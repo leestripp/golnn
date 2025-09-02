@@ -29,7 +29,7 @@ public:
 		FLEE
 	};
 	
-	Agent(ls3DRNN brain, const glm::mat4& initial_transform, AgentType type, float learning_rate = -1.0f, float initial_energy = -1.0f);
+	Agent(ls3DRNN brain, const glm::mat4& initial_transform, AgentType type, float learning_rate = -1.0f, float initial_energy = -1.0f, size_t state_hidden_dim = 0);
  	
 	void update(const Simulation& world);
 	
@@ -53,7 +53,9 @@ public:
 	static constexpr size_t NUM_FOOD_DISTANCE_BINS = 4;   // For food distance
 	static constexpr size_t STATE_BRAIN_INPUT_DIM = NUM_ENERGY_BINS + NUM_DISTANCE_BINS + NUM_FOOD_DISTANCE_BINS;
 	static constexpr size_t NUM_STATES = 4; // IDLE, ROAM, HUNT, FLEE
-	static constexpr size_t STATE_BRAIN_HIDDEN_DIM = 16;
+	// State brain hidden layer size is now randomized on creation
+	static constexpr size_t MIN_STATE_NEURONS = 4;
+	static constexpr size_t MAX_STATE_NEURONS = 32;
 	
 private:
 	void update_state_transitions(const Simulation& world);
@@ -70,10 +72,8 @@ private:
 	glm::vec3 m_base_color;	  // Base color determined by agent type
 	float m_energy_decay_rate; // Agent's specific energy decay per tick
 	float m_learning_rate;	 // Each agent has its own learning rate
+	size_t m_state_brain_hidden_dim; // Number of neurons in the state brain's hidden layer
 	lsRNN m_state_brain;	   // New state-selection brain
-
-	State m_last_state;		// State from the previous tick, for reward logic
-	float m_last_energy;	   // Energy from the previous tick, for reward logic
 
 	// Simulation Parameters
 	static constexpr float INITIAL_ENERGY = 100.0f;
@@ -89,17 +89,16 @@ private:
 	
 	// Agent Type Specific Parameters
 	static constexpr float FEEDER_ENERGY_DECAY = 0.02f;
-	static constexpr float PREDATOR_ENERGY_DECAY = 0.05f;
+	static constexpr float PREDATOR_ENERGY_DECAY = 0.06f;
 	
-	static constexpr float FEEDER_ENERGY_TO_REPRODUCE = 120.0f;
-	static constexpr float PREDATOR_ENERGY_TO_REPRODUCE = 130.0f;
+	static constexpr float FEEDER_ENERGY_TO_REPRODUCE = 110.0f;
+	static constexpr float PREDATOR_ENERGY_TO_REPRODUCE = 120.0f;
 	
 	// State transition parameters
-	static constexpr float ROAM_FOLLOW_RADIUS_SQ = 50.0f;			// ~7 units squared
+	static constexpr float ROAM_FOLLOW_RADIUS_SQ = 100.0f;			// units squared
 	static constexpr float PREDATOR_DETECTION_RADIUS_SQ = 400.0f;	// 20 units squared
 	static constexpr float FEEDER_FOOD_DETECTION_RADIUS_SQ = 400.0f; // 20 units squared
 	static constexpr float PREDATOR_HUNT_RADIUS_SQ = 400.0f;		// 20 units squared
 };
 
 #endif // AGENT_H
-

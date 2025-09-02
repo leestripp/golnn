@@ -18,12 +18,13 @@ static std::uniform_real_distribution<float> chance_dis(0.0f, 1.0f); // For rand
 static std::uniform_int_distribution<int> layer_dist(1, Simulation::MAX_LAYER_COUNT);
 static std::uniform_int_distribution<int> neuron_dist(4, Simulation::MAX_NEURON_COUNT);
 
+
 Simulation::Simulation(size_t initial_agents, size_t initial_food, float world_size)
 	: m_world_size(world_size)
 {
 	// Initialize with a few agents and some food
 	spawn_initial_agents(initial_agents);
-	spawn_new_food(initial_food, 0.8f);
+	spawn_new_food(initial_food, 0.8f); // This will spawn VEGETABLE food by default
 }
 
 void Simulation::tick() {
@@ -44,23 +45,28 @@ void Simulation::tick() {
 
 void Simulation::handle_agent_interactions()
 {
-	// --- Phase 1: Feeders eat food ---
+	// --- Phase 1: Agents eat food ---
 	std::vector<size_t> eaten_food_indices;
 	for(auto& agent : m_agents)
 	{
-		if (agent.m_type != Agent::AgentType::FEEDER) continue;
-		
+		if (agent.isDead()) continue;
+
 		glm::vec3 agent_pos = glm::vec3(agent.m_transform[3]);
 		for(size_t i = 0; i < m_food.size(); ++i)
 		{
-			// Check if food is close enough to be eaten (distance < 1)
-			if (glm::distance2(agent_pos, m_food[i].position) < MIN_DIST_TO_EAT_SQ) {
-				// Check if this food has already been marked for removal in this tick
-				if (std::find(eaten_food_indices.begin(), eaten_food_indices.end(), i) == eaten_food_indices.end()) {
-					agent.m_energy += 50.0f;
-					eaten_food_indices.push_back(i);
-					break; // This agent has eaten, move to the next agent
-				}
+			// Check if food has already been marked for removal
+			if (std::find(eaten_food_indices.begin(), eaten_food_indices.end(), i) != eaten_food_indices.end()) {
+				continue;
+			}
+
+			// Check if agent can eat this food type
+			bool can_eat = (agent.m_type == Agent::AgentType::FEEDER && m_food[i].m_food_type == FoodType::VEGETABLE) ||
+			               (agent.m_type == Agent::AgentType::PREDATOR && m_food[i].m_food_type == FoodType::MEAT);
+
+			if (can_eat && glm::distance2(agent_pos, m_food[i].position) < MIN_DIST_TO_EAT_SQ) {
+				agent.m_energy += 50.0f;
+				eaten_food_indices.push_back(i);
+				break; // This agent has eaten, move to the next agent
 			}
 		}
 	}
@@ -81,7 +87,7 @@ void Simulation::handle_agent_interactions()
 
 		// First, prioritize finding the closest feeder in attack range
 		for (auto& potential_prey : m_agents) {
-			if (potential_prey.m_type != Agent::AgentType::FEEDER) continue;
+			if (potential_prey.m_type != Agent::AgentType::FEEDER || potential_prey.isDead()) continue;
 			
 			float dist_sq = glm::distance2(predator_pos, glm::vec3(potential_prey.m_transform[3]));
 			if (dist_sq < min_feeder_dist_sq) {
@@ -103,7 +109,7 @@ void Simulation::handle_agent_interactions()
 
 		for (auto& potential_prey : m_agents) {
 			// Can't attack itself, and must be a predator
-			if (&potential_prey == &predator || potential_prey.m_type != Agent::AgentType::PREDATOR) continue;
+			if (&potential_prey == &predator || potential_prey.m_type != Agent::AgentType::PREDATOR || potential_prey.isDead()) continue;
 			
 			float dist_sq = glm::distance2(predator_pos, glm::vec3(potential_prey.m_transform[3]));
 			if (dist_sq < min_predator_dist_sq) {
@@ -148,11 +154,10 @@ void Simulation::cleanup_dead_agents_and_spawn_offspring()
 	{
 		if(agent.isDead())
 		{
-			// Check food count.
-			if(m_food.size() < MAX_FOOD)
+			// When a feeder dies, it leaves meat behind for predators.
+			if(m_food.size() < MAX_FOOD && agent.m_type == Agent::AgentType::FEEDER)
 			{
-				// Agent is dead. Spawn food in its place.
-				spawn_food(1, 0.8f);
+				m_food.push_back({FoodType::MEAT, glm::vec3(agent.m_transform[3])});
 			}
 		} else // Agent is alive
 		{
@@ -176,7 +181,7 @@ void Simulation::cleanup_dead_agents_and_spawn_offspring()
 	}
 }
 
-void Simulation::spawn_food(size_t count, float food_area_scale)
+void Simulation::spawn_food(size_t count, float food_area_scale, FoodType type)
 {
 	// Hard limit on food.
 	if(m_food.size() >= MAX_FOOD)
@@ -194,7 +199,7 @@ void Simulation::spawn_food(size_t count, float food_area_scale)
 		glm::vec3 pos(dis(gen) * food_spawn_radius,
 					  dis(gen) * food_spawn_radius,
 					  dis(gen) * food_spawn_radius);
-		m_food.push_back({pos});
+		m_food.push_back({type, pos});
 	}
 }
 
@@ -202,7 +207,7 @@ void Simulation::spawn_food(size_t count, float food_area_scale)
 void Simulation::spawn_new_food(size_t count, float food_area_scale)
 {
 	std::lock_guard<std::mutex> lock(m_data_mutex);
-	spawn_food(count, food_area_scale);
+	spawn_food(count, food_area_scale, FoodType::VEGETABLE);
 }
 
 // Public method to spawn agents at runtime. It's thread-safe.
@@ -260,4 +265,3 @@ void Simulation::spawn_agents_internal(size_t count)
 		m_agents.emplace_back(brain, initial_transform, type);
 	}
 }
-

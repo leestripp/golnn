@@ -256,12 +256,16 @@ bool Game::on_timer_tick()
         }
     }
 	
-    // Get food data (render as points)
+    // Get food data (render as points with type-specific colors)
     for(const auto& food : m_simulation.m_food)
 	{
+		double r = 0.2, g = 0.8, b = 0.2; // Default to green (VEGETABLE)
+		if (food.m_food_type == FoodType::MEAT) {
+			r = 0.8; g = 0.2; b = 0.2; // Red for MEAT
+		}
         food_render_data.push_back({
             (double)food.position.x, (double)food.position.y, (double)food.position.z,
-            0.2, 0.8, 0.2
+            r, g, b
         });
     }
 	
@@ -278,3 +282,4 @@ int main()
     Game game;
     return game.run();
 }
+
