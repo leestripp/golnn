@@ -15,7 +15,10 @@ Predators Base Colour : Yellow (1.0f, 1.0f, 0.0f)
 Feeders Base Colour : Deep Blue (0.0f, 0.0f, 1.0f)
 Predators should eat each other if there isn't a Feeder to eat.
 Increase distance to find food for both Agents to World size * 0.5.
-ls3DRNN: Is working DO NOT modify it.
+ls3DRNN:
+We need to change how Teacher Forcing works. I'm thinking we chould now use sencors to find food direction and distance. Create a function to find food by TYPE based on Agent current position. It needs to be flexable to support both Types of agent. The function will return a normalized direction vector of the food. Now the key part, the ls3DRNN will only be taught the direction of the food, NOT the exact position.
+This should be more like the real world.
+Shifting from teaching the ls3DRNN an absolute target position to teaching it a directional vector based on sensory input is a much more robust and biologically plausible approach. This encourages the agent's brain to learn a mapping from its sensory inputs to a desired direction of movement, which is a more generalized skill.
 
 lsRNN:
 I've added lsRNN, to pick states based on Energy Level, distance to food and distance to enemy (predator).
@@ -35,6 +38,4 @@ If the Feeder agent is outside, Adjust the position of the MEAT (food) to be ins
 Another version bump.
 
 Next step:
-ls3DRNN:
-We need to change how Teacher Forcing works. I'm thinking we chould now use sencors to find food direction and distance. Create a function to find food by TYPE based on Agent current position. It needs to be flexable to support both Types of agent. The function will return a normalized direction vector of the food. Now the key part, the ls3DRNN will only be taught the direction of the food, NOT the exact position.
-This should be more like the real world.
+Shifting from teaching the ls3DRNN an absolute target position to teaching it a directional vector based on sensory input.

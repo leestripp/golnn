@@ -62,6 +62,7 @@ private:
 	void train_brain(const Simulation& world, const std::vector<float>& perception_vector, float learning_rate);
 	void train_state_brain(const Simulation& world);
 	std::vector<float> perceive(const Simulation& world);
+	glm::vec3 find_closest_food_direction(const Simulation& world, size_t food_type) const;
 
 	// These are the target positions for the RNN inputs, updated each tick.
 	// They are set to zero if no target is available in the current state.

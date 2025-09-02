@@ -347,63 +347,114 @@ void Agent::update_state_transitions(const Simulation& /* world */)
 	m_state = next_state;
 }
 
+// New sensor function to find the direction to the closest food of a specific type.
+glm::vec3 Agent::find_closest_food_direction(const Simulation& world, size_t food_type) const
+{
+	glm::vec3 agent_pos = m_transform[3];
+	glm::vec3 closest_food_pos(0.0f);
+	float min_dist_sq = std::numeric_limits<float>::max();
+	bool found_food = false;
 
-// Teacher-forcing for the movement brain
-void Agent::train_brain(const Simulation& /* world */, const std::vector<float>& perception_vector, float learning_rate) {
-	glm::vec3 target_pos(0.0f);
+	const float detection_radius = world.m_world_size * 0.5f;
+	const float detection_radius_sq = detection_radius * detection_radius;
+
+	for (const auto& food : world.m_food) {
+		if (food.m_food_type == food_type) {
+			float dist_sq = glm::distance2(agent_pos, food.position);
+			if (dist_sq < detection_radius_sq && dist_sq < min_dist_sq) {
+				min_dist_sq = dist_sq;
+				closest_food_pos = food.position;
+				found_food = true;
+			}
+		}
+	}
+
+	if (found_food) {
+		glm::vec3 direction = closest_food_pos - agent_pos;
+		if (glm::length2(direction) > 1e-6f) {
+			return glm::normalize(direction);
+		}
+	}
+
+	return glm::vec3(0.0f); // Return zero vector if no food is found
+}
+
+
+// Teacher-forcing for the movement brain using the new directional sensor approach.
+void Agent::train_brain(const Simulation& world, const std::vector<float>& perception_vector, float learning_rate)
+{
+	glm::vec3 desired_direction(0.0f);
 	bool has_target = false;
 
-	// Determine target based on state
+	glm::vec3 agent_pos = m_transform[3];
+
+	// Determine the ideal direction of movement based on the agent's state.
 	switch (m_state) {
 		case State::HUNT:
 			if (m_type == AgentType::FEEDER) {
-				target_pos = m_food_pos;
+				// Use the sensor function to find the direction to the nearest VEGETABLE.
+				desired_direction = find_closest_food_direction(world, FoodType::VEGETABLE);
 			} else { // PREDATOR
-				// Predators prioritize hunting agents over scavenging meat.
-				target_pos = (m_threat_pos != glm::vec3(0.0f)) ? m_threat_pos : m_food_pos;
+				// Predators prioritize hunting other agents over scavenging.
+				if (m_threat_pos != glm::vec3(0.0f)) {
+					glm::vec3 dir_to_threat = m_threat_pos - agent_pos;
+					if (glm::length2(dir_to_threat) > 1e-6f) {
+						desired_direction = glm::normalize(dir_to_threat);
+					}
+				} else {
+					// If no agent prey is visible, hunt for MEAT.
+					desired_direction = find_closest_food_direction(world, FoodType::MEAT);
+				}
 			}
-			has_target = true;
+			has_target = (desired_direction != glm::vec3(0.0f));
 			break;
+
 		case State::FLEE:
-			target_pos = m_threat_pos;
-			has_target = true;
+			if (m_threat_pos != glm::vec3(0.0f)) {
+				glm::vec3 dir_to_threat = m_threat_pos - agent_pos;
+				if (glm::length2(dir_to_threat) > 1e-6f) {
+					// The ideal direction is away from the threat.
+					desired_direction = -glm::normalize(dir_to_threat);
+					has_target = true;
+				}
+			}
 			break;
+
 		case State::ROAM:
-			target_pos = m_follow_agent_pos;
-			has_target = (target_pos != glm::vec3(0.0f));
+			 if (m_follow_agent_pos != glm::vec3(0.0f)) {
+				glm::vec3 dir_to_follow = m_follow_agent_pos - agent_pos;
+				if (glm::length2(dir_to_follow) > 1e-6f) {
+					desired_direction = glm::normalize(dir_to_follow);
+					has_target = true;
+				}
+			 }
 			break;
+
 		case State::IDLE:
 		default:
-			break; // No specific target
+			// No specific target direction.
+			break;
 	}
 
-	glm::vec3 agent_pos = m_transform[3];
 	glm::vec3 agent_fwd = glm::normalize(glm::vec3(m_transform[2]));
 
-	// --- Calculate Ideal Delta Transform ---
+	// --- Calculate Ideal Delta Transform based on the desired direction ---
 	glm::vec3 desired_translation(0.0f);
 	glm::quat desired_rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f); // Identity
 
-	if (has_target && target_pos != glm::vec3(0.0f)) {
-		glm::vec3 dir_to_target = target_pos - agent_pos;
-		if (glm::length2(dir_to_target) > 1e-6f) {
-			dir_to_target = glm::normalize(dir_to_target);
-			if (m_state == State::FLEE) {
-				dir_to_target = -dir_to_target; // Flee in the opposite direction
-			}
-			desired_translation = dir_to_target * MAX_SPEED;
-			
-			// Smoothly rotate towards the target direction
-			glm::quat target_rot = glm::rotation(agent_fwd, dir_to_target);
-			desired_rotation = glm::slerp(glm::quat(1.0f, 0.0f, 0.0f, 0.0f), target_rot, ROTATION_LERP_FACTOR);
-		}
-
-	} else { // IDLE or ROAM without a follow target
-		// Just move forward slowly
+	if (has_target) {
+		// The ideal translation is to move at max speed in the desired direction.
+		desired_translation = desired_direction * MAX_SPEED;
+		
+		// The ideal rotation is to smoothly turn to face the desired direction.
+		glm::quat target_rot = glm::rotation(agent_fwd, desired_direction);
+		desired_rotation = glm::slerp(glm::quat(1.0f, 0.0f, 0.0f, 0.0f), target_rot, ROTATION_LERP_FACTOR);
+	} else {
+		// For IDLE or ROAM without a target, just move forward slowly.
 		desired_translation = agent_fwd * (MAX_SPEED * 0.2f);
 	}
 
-	// --- Create Target Parameter Vector ---
+	// --- Create Target Parameter Vector for the RNN ---
 	std::vector<float> target_params(7);
 	target_params[0] = desired_translation.x;
 	target_params[1] = desired_translation.y;
