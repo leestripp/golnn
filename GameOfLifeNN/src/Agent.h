@@ -89,10 +89,10 @@ private:
 	
 	// Agent Type Specific Parameters
 	static constexpr float FEEDER_ENERGY_DECAY = 0.02f;
-	static constexpr float PREDATOR_ENERGY_DECAY = 0.06f;
+	static constexpr float PREDATOR_ENERGY_DECAY = 0.04f;
 	
 	static constexpr float FEEDER_ENERGY_TO_REPRODUCE = 110.0f;
-	static constexpr float PREDATOR_ENERGY_TO_REPRODUCE = 120.0f;
+	static constexpr float PREDATOR_ENERGY_TO_REPRODUCE = 110.0f;
 	
 	// State transition parameters
 	static constexpr float ROAM_FOLLOW_RADIUS_SQ = 100.0f;			// units squared

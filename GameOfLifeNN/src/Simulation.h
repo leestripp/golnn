@@ -51,6 +51,8 @@ private:
     void spawn_food(size_t count, float food_area_scale, FoodType type = FoodType::VEGETABLE);
     void spawn_agents_internal(size_t count);
     void spawn_initial_agents(size_t count);
+
+    size_t m_food_spawn_timer; // Timer for food regrowth
 	
 	// Static variables for simulation parameters
 	static constexpr float MIN_DIST_TO_EAT_SQ = 1.0f;		// Squared distance to eat food (1 unit)
@@ -60,6 +62,9 @@ private:
 	// Limits
 	static constexpr size_t MAX_AGENTS = 1000;
 	static constexpr size_t MAX_FOOD = 1000;
+    // Food regrowth parameters
+    static constexpr size_t FOOD_SPAWN_INTERVAL_TICKS = 500; // Spawn food every N ticks
+    static constexpr size_t FOOD_SPAWN_AMOUNT = 10;          // Number of food items to spawn
 };
 
 #endif // SIMULATION_H

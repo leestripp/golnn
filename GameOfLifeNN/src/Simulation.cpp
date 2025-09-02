@@ -20,25 +20,36 @@ static std::uniform_int_distribution<int> neuron_dist(4, Simulation::MAX_NEURON_
 
 
 Simulation::Simulation(size_t initial_agents, size_t initial_food, float world_size)
-	: m_world_size(world_size)
+	: m_world_size(world_size),
+	m_food_spawn_timer(0)
 {
 	// Initialize with a few agents and some food
 	spawn_initial_agents(initial_agents);
 	spawn_new_food(initial_food, 0.8f); // This will spawn VEGETABLE food by default
 }
 
+
 void Simulation::tick() {
-	// Lock the data to prevent race conditions with rendering thread (if any)
+	// Lock the data to prevent race conditions with rendering thread
 	std::lock_guard<std::mutex> lock(m_data_mutex);
 
+    // Food Regrowth Timer
+    m_food_spawn_timer++;
+    if(m_food_spawn_timer >= FOOD_SPAWN_INTERVAL_TICKS)
+    {
+        spawn_food(FOOD_SPAWN_AMOUNT, 0.8f, FoodType::VEGETABLE);
+        m_food_spawn_timer = 0;
+    }
+	
 	// 1. Update each agent
-	for (auto& agent : m_agents) {
+	for(auto& agent : m_agents)
+	{
 		agent.update(*this);
 	}
-
+	
 	// 2. Handle interactions (eating, predation)
 	handle_agent_interactions();
-
+	
 	// 3. Handle death and reproduction
 	cleanup_dead_agents_and_spawn_offspring();
 }
@@ -157,7 +168,15 @@ void Simulation::cleanup_dead_agents_and_spawn_offspring()
 			// When a feeder dies, it leaves meat behind for predators.
 			if(m_food.size() < MAX_FOOD && agent.m_type == Agent::AgentType::FEEDER)
 			{
-				m_food.push_back({FoodType::MEAT, glm::vec3(agent.m_transform[3])});
+				glm::vec3 food_pos = glm::vec3(agent.m_transform[3]);
+				float half_world_size = m_world_size / 2.0f;
+
+				// Ensure the food spawns within the world boundaries.
+				food_pos.x = std::clamp(food_pos.x, -half_world_size, half_world_size);
+				food_pos.y = std::clamp(food_pos.y, -half_world_size, half_world_size);
+				food_pos.z = std::clamp(food_pos.z, -half_world_size, half_world_size);
+				
+				m_food.push_back({FoodType::MEAT, food_pos});
 			}
 		} else // Agent is alive
 		{
@@ -181,6 +200,7 @@ void Simulation::cleanup_dead_agents_and_spawn_offspring()
 	}
 }
 
+
 void Simulation::spawn_food(size_t count, float food_area_scale, FoodType type)
 {
 	// Hard limit on food.
@@ -193,7 +213,9 @@ void Simulation::spawn_food(size_t count, float food_area_scale, FoodType type)
 	
 	for(size_t i = 0; i < count; ++i)
 	{
+		// Always check our food count.
 		if(m_food.size() >= MAX_FOOD) break;
+		
 		// 'dis' is a uniform distribution from -1.0 to 1.0.
 		// Multiplying by the radius gives a random point within the centered cube.
 		glm::vec3 pos(dis(gen) * food_spawn_radius,
@@ -209,6 +231,9 @@ void Simulation::spawn_new_food(size_t count, float food_area_scale)
 	std::lock_guard<std::mutex> lock(m_data_mutex);
 	spawn_food(count, food_area_scale, FoodType::VEGETABLE);
 }
+
+
+
 
 // Public method to spawn agents at runtime. It's thread-safe.
 void Simulation::spawn_new_agents(size_t count)

@@ -27,11 +27,14 @@ When Agents reproduce, double check agent count isn't to high (new agents + exis
 Agents:
 * Inputs to the Agents ls3DRNN brai, give.position of food and enemy agents, It works better this way.
 Lets start feeding in the STATE result into the Agent ls3DRNN for better awareness of State.
-
-Next change:
-struct Food {
-	size_t m_food_type;
-    glm::vec3 position;
-};
-When a Feeder Agent dies, it will leave different food behind. m_food_type. That Predators can eat.
+When a Feeder Agent dies, it will leave food type MEAT behind that predators can eat.
 We need to add food types. vegitable, meat. So feeders can only eat Vegies, Predators can only eat Meat and Feeder agents.
+Now that Feeders only get food at the start, we use a Timer to sumulate plants growing for food, so feeders have something to eat.
+When a Feeder agent dies, ve MUST check the Agents position isn't outside the world bounds before adding the MEAT food.
+If the Feeder agent is outside, Adjust the position of the MEAT (food) to be inside the bounds.
+Another version bump.
+
+Next step:
+Now we need a new Part 2 script for a podcast, to be performed by the Notebook LM podcast Audio Overview. Remember to start off by saying how Lee Stripp and Gemini 2.5 Pro worked on this project together.
+Once the human started to understand how the AI needed him to keep the old prompt as part of the full prompt the whole process went much more smoothly.
+Talk about all the great features in this new version.
