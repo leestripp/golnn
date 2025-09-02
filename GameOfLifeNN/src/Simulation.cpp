@@ -260,9 +260,9 @@ void Simulation::spawn_agents_internal(size_t count)
 		}
 
 		// The perception vector has 17 inputs:
-		// - Food: World position (x, y, z) & distance (1) -> 4
-		// - Follow Agent: World position (x, y, z) & distance (1) -> 4
-		// - Threat/Prey: World position (x, y, z) & distance (1) -> 4
+		// - Food: Direction vector (x, y, z) & distance (1) -> 4
+		// - Follow Agent: Direction vector (x, y, z) & distance (1) -> 4
+		// - Threat/Prey: Direction vector (x, y, z) & distance (1) -> 4
 		// - Own energy (1)
 		// - Current State (one-hot encoded) (4)
 		constexpr size_t perception_vector_size = 17;
@@ -290,3 +290,4 @@ void Simulation::spawn_agents_internal(size_t count)
 		m_agents.emplace_back(brain, initial_transform, type);
 	}
 }
+

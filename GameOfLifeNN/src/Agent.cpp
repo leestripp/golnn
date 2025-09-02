@@ -259,28 +259,46 @@ std::vector<float> Agent::perceive(const Simulation& world)
 	if (found_follow) m_follow_agent_pos = closest_follow_pos;
 	if (found_threat) m_threat_pos = closest_threat_pos;
 
-	// --- Fill Perception Vector for Movement Brain (World Position & Distance) ---
+	// --- Fill Perception Vector for Movement Brain (Direction Vector & Distance) ---
 	// Food
 	if (found_food) {
-		perception[0] = closest_food_pos.x;
-		perception[1] = closest_food_pos.y;
-		perception[2] = closest_food_pos.z;
+		glm::vec3 direction = closest_food_pos - agent_pos;
+		if (glm::length2(direction) > 1e-6f) {
+			direction = glm::normalize(direction);
+		} else {
+			direction = glm::vec3(0.0f);
+		}
+		perception[0] = direction.x;
+		perception[1] = direction.y;
+		perception[2] = direction.z;
 		perception[3] = sqrt(min_food_dist_sq);
 	}
 
 	// Follow Agent
 	if (found_follow) {
-		perception[4] = closest_follow_pos.x;
-		perception[5] = closest_follow_pos.y;
-		perception[6] = closest_follow_pos.z;
+		glm::vec3 direction = closest_follow_pos - agent_pos;
+		if (glm::length2(direction) > 1e-6f) {
+			direction = glm::normalize(direction);
+		} else {
+			direction = glm::vec3(0.0f);
+		}
+		perception[4] = direction.x;
+		perception[5] = direction.y;
+		perception[6] = direction.z;
 		perception[7] = sqrt(min_follow_dist_sq);
 	}
 
 	// Threat/Prey Agent
 	if (found_threat) {
-		perception[8] = closest_threat_pos.x;
-		perception[9] = closest_threat_pos.y;
-		perception[10] = closest_threat_pos.z;
+		glm::vec3 direction = closest_threat_pos - agent_pos;
+		if (glm::length2(direction) > 1e-6f) {
+			direction = glm::normalize(direction);
+		} else {
+			direction = glm::vec3(0.0f);
+		}
+		perception[8] = direction.x;
+		perception[9] = direction.y;
+		perception[10] = direction.z;
 		perception[11] = sqrt(min_threat_dist_sq);
 	}
 

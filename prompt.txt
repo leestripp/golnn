@@ -39,3 +39,8 @@ Another version bump.
 
 Next step:
 Shifting from teaching the ls3DRNN an absolute target position to teaching it a directional vector based on sensory input.
+What other sensory input can you think of that would help our Agents out?
+Now check if the Predators are being trained on position or a direction for eating Feeder agents.
+If Predators are using absolute position, please change this to use a direction vector like we do with food.
+
+
