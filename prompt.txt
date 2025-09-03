@@ -62,4 +62,3 @@ While direction to food and threats is a fantastic start, here are several other
     *   **What it is:** A simplified "hearing" mechanism. Events like a predator attacking or a feeder eating could generate a "sound" at their location. Other agents within a large radius would "hear" it.
     *   **Input to Brain:** A 3D vector pointing towards the source of the most recent or loudest sound, and perhaps a scalar value for the "type" of sound (e.g., 1.0 for danger, 0.5 for food).
     *   **Why it's useful:** This provides long-range, omnidirectional information. A feeder could be alerted to danger far outside its visual range, and a predator could be drawn to the sound of other predators successfully hunting, potentially to steal the kill.
-
