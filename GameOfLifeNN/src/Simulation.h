@@ -64,7 +64,7 @@ private:
 	static constexpr size_t MAX_FOOD = 1000;
     // Food regrowth parameters
     static constexpr size_t FOOD_SPAWN_INTERVAL_TICKS = 500; // Spawn food every N ticks
-    static constexpr size_t FOOD_SPAWN_AMOUNT = 10;          // Number of food items to spawn
+    static constexpr size_t FOOD_SPAWN_AMOUNT = 1;          // Number of food items to spawn
 };
 
 #endif // SIMULATION_H

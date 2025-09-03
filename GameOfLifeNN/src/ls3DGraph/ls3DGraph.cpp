@@ -65,7 +65,7 @@ ls3DGraph::ls3DGraph() :
 	m_camera_up(0.0f, 1.0f, 0.0f),
 	m_camera_yaw(-90.0f),
 	m_camera_pitch(0.0f),
-	m_camera_speed(12.0f),
+	m_camera_speed(15.0f),
 	m_agents_vertex_count(0),
 	m_agents_data_dirty(false),
 	m_food_vertex_count(0),
@@ -290,7 +290,7 @@ void ls3DGraph::on_unrealize()
 
 bool ls3DGraph::on_render(const Glib::RefPtr<Gdk::GLContext>&)
 {
-	glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+	glClearColor(0.0f, 0.1f, 0.0f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	
 	m_projection = glm::perspective(glm::radians(45.0f), (float)get_width() / (float)get_height(), 0.01f, 1000.0f);

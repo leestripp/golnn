@@ -143,18 +143,33 @@ void Simulation::cleanup_dead_agents_and_spawn_offspring()
 	if(m_agents.size() == 1 && m_agents[0].isDead())
 	{
 		const Agent& last_agent = m_agents[0];
-		std::vector<size_t> hidden_dims = last_agent.m_brain.get_hidden_layer_dims();
 		std::string agent_type_str = (last_agent.m_type == Agent::AgentType::PREDATOR) ? "Predator" : "Feeder";
+		
+		std::vector<size_t> ls3d_hidden_dims = last_agent.m_brain.get_hidden_layer_dims();
+		size_t ls_hidden_dim = last_agent.get_state_brain_hidden_dim();
+		float learning_rate = last_agent.get_learning_rate();
 			
-	// Output: Agent type, layer count and neuron count per layer.
 		std::cout << "\n--- Alpha Agent Died ---\n";
 		std::cout << "Type: " << agent_type_str << "\n";
-		std::cout << "Hidden Layers: " << hidden_dims.size() << "\n";
+		std::cout << "Learning Rate: " << learning_rate << "\n";
+		
+		std::cout << "\n-- Movement Brain (ls3DRNN) --\n";
+		std::cout << "Hidden Layers: " << ls3d_hidden_dims.size() << "\n";
 		std::cout << "Neurons per Layer: [ ";
-		for (size_t i = 0; i < hidden_dims.size(); ++i) {
-			std::cout << hidden_dims[i] << (i == hidden_dims.size() - 1 ? "" : ", ");
+		if (ls3d_hidden_dims.empty()) {
+			std::cout << "N/A";
+		} else {
+			for (size_t i = 0; i < ls3d_hidden_dims.size(); ++i) {
+				std::cout << ls3d_hidden_dims[i] << (i == ls3d_hidden_dims.size() - 1 ? "" : ", ");
+			}
 		}
-		std::cout << " ]\n--------------------------\n" << std::endl;
+		std::cout << " ]\n";
+		
+		std::cout << "\n-- State Brain (lsRNN) --\n";
+		std::cout << "Hidden Layers: 1\n";
+		std::cout << "Neurons per Layer: [ " << ls_hidden_dim << " ]\n";
+		
+		std::cout << "--------------------------\n" << std::endl;
 	}
 	
 	std::vector<Agent> surviving_agents;
@@ -290,4 +305,3 @@ void Simulation::spawn_agents_internal(size_t count)
 		m_agents.emplace_back(brain, initial_transform, type);
 	}
 }
-

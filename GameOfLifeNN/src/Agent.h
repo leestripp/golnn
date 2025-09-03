@@ -1,3 +1,4 @@
+
 #ifndef AGENT_H
 #define AGENT_H
 
@@ -36,6 +37,9 @@ public:
 	bool isDead() const;
 	bool canReproduce() const;
 	Agent reproduce();
+	
+	float get_learning_rate() const;
+	size_t get_state_brain_hidden_dim() const;
 	
 	// -- Public State --
 	ls3DRNN m_brain;
@@ -89,8 +93,8 @@ private:
 	static constexpr float MUTATION_AMOUNT = 0.01f; // Max change during mutation
 	
 	// Agent Type Specific Parameters
-	static constexpr float FEEDER_ENERGY_DECAY = 0.02f;
-	static constexpr float PREDATOR_ENERGY_DECAY = 0.04f;
+	static constexpr float FEEDER_ENERGY_DECAY = 0.05f;
+	static constexpr float PREDATOR_ENERGY_DECAY = 0.07f;
 	
 	static constexpr float FEEDER_ENERGY_TO_REPRODUCE = 110.0f;
 	static constexpr float PREDATOR_ENERGY_TO_REPRODUCE = 110.0f;

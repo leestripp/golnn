@@ -36,11 +36,10 @@ Now that Feeders only get food at the start, we use a Timer to sumulate plants g
 When a Feeder agent dies, ve MUST check the Agents position isn't outside the world bounds before adding the MEAT food.
 If the Feeder agent is outside, Adjust the position of the MEAT (food) to be inside the bounds.
 Another version bump.
-
-Next step:
 Shifting from teaching the ls3DRNN an absolute target position to teaching it a directional vector based on sensory input.
 What other sensory input can you think of that would help our Agents out?
 Now check if the Predators are being trained on position or a direction for eating Feeder agents.
 If Predators are using absolute position, please change this to use a direction vector like we do with food.
 
-
+Next step:
+We need to output more info on the Alpha Agent when it dies. Output: learning rate, layer count, neuron count per layer. And I want that for both brains, lsRNN and ls3DRNN.

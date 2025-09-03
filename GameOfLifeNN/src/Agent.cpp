@@ -308,7 +308,6 @@ std::vector<float> Agent::perceive(const Simulation& world)
 	return perception;
 }
 
-
 // The "Teacher" - sets the correct state based on the agent's internal world model.
 void Agent::update_state_transitions(const Simulation& /* world */)
 {
@@ -546,6 +545,16 @@ void Agent::train_state_brain(const Simulation& /* world */)
 	std::vector<std::vector<double>> outputs_sequence = { predicted_output };
 	std::vector<std::vector<double>> expected_sequence = { target_state_vec };
 	m_state_brain.backpropagate(inputs_sequence, outputs_sequence, expected_sequence, m_learning_rate);
+}
+
+float Agent::get_learning_rate() const
+{
+	return m_learning_rate;
+}
+
+size_t Agent::get_state_brain_hidden_dim() const
+{
+	return m_state_brain_hidden_dim;
 }
 
 bool Agent::isDead() const
