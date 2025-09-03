@@ -41,8 +41,8 @@ public:
 	
     // --- Simulation Parameters ---
 	// Brain structure parameters for new agents
-	static constexpr int MAX_LAYER_COUNT = 5;
-	static constexpr int MAX_NEURON_COUNT = 32;
+	static constexpr int MAX_LAYER_COUNT = 12;
+	static constexpr int MAX_NEURON_COUNT = 96;
 	
 private:
     // Helper functions for the simulation loop
@@ -64,7 +64,7 @@ private:
 	static constexpr size_t MAX_FOOD = 1000;
     // Food regrowth parameters
     static constexpr size_t FOOD_SPAWN_INTERVAL_TICKS = 500; // Spawn food every N ticks
-    static constexpr size_t FOOD_SPAWN_AMOUNT = 1;          // Number of food items to spawn
+    static constexpr size_t FOOD_SPAWN_AMOUNT = 5;          // Number of food items to spawn
 };
 
 #endif // SIMULATION_H

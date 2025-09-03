@@ -15,8 +15,8 @@ static std::uniform_real_distribution<float> chance_dis(0.0f, 1.0f); // For rand
 
 // Brain structure randomization
 // The distributions are initialized using the constants defined in Simulation.h
-static std::uniform_int_distribution<int> layer_dist(1, Simulation::MAX_LAYER_COUNT);
-static std::uniform_int_distribution<int> neuron_dist(4, Simulation::MAX_NEURON_COUNT);
+static std::uniform_int_distribution<int> layer_dist(2, Simulation::MAX_LAYER_COUNT);
+static std::uniform_int_distribution<int> neuron_dist(2, Simulation::MAX_NEURON_COUNT);
 
 
 Simulation::Simulation(size_t initial_agents, size_t initial_food, float world_size)

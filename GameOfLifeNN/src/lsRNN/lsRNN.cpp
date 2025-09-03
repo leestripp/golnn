@@ -165,7 +165,7 @@ void lsRNN::reset_state()
 	m_h_history.push_back(h);
 }
 
-void lsRNN::print_nodes()
+void lsRNN::print_weights()
 {
 	cout << "### Hidden Layers:" << endl;
 	for(const auto& row : W_hh) {

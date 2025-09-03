@@ -92,8 +92,8 @@ private:
 	static constexpr float MUTATION_AMOUNT = 0.01f; // Max change during mutation
 	
 	// Agent Type Specific Parameters
-	static constexpr float FEEDER_ENERGY_DECAY = 0.03f;
-	static constexpr float PREDATOR_ENERGY_DECAY = 0.05f;
+	static constexpr float FEEDER_ENERGY_DECAY = 0.01f;
+	static constexpr float PREDATOR_ENERGY_DECAY = 0.03f;
 	
 	static constexpr float FEEDER_ENERGY_TO_REPRODUCE = 110.0f;
 	static constexpr float PREDATOR_ENERGY_TO_REPRODUCE = 110.0f;

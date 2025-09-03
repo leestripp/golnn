@@ -49,7 +49,7 @@ public:
 	double denormalize_value(double normalized_val, double min_val, double max_val);
 	
 	// debug
-	void print_nodes();
+	void print_weights();
 	
 private:
 	// Utility functions
