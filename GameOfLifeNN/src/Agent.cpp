@@ -114,12 +114,12 @@ void Agent::update(const Simulation& world)
 	train_state_brain(world);
 	
 	// Add current state to the perception vector for the movement brain
-	// The perception vector is size 17. Indices 13, 14, 15, 16 are for state.
+	// The perception vector is size 22. Indices 18, 19, 20, 21 are for state.
 	// We create a one-hot encoding of the current state.
-	perception_vector[13] = (m_state == State::IDLE) ? 1.0f : 0.0f;
-	perception_vector[14] = (m_state == State::ROAM) ? 1.0f : 0.0f;
-	perception_vector[15] = (m_state == State::HUNT) ? 1.0f : 0.0f;
-	perception_vector[16] = (m_state == State::FLEE) ? 1.0f : 0.0f;
+	perception_vector[18] = (m_state == State::IDLE) ? 1.0f : 0.0f;
+	perception_vector[19] = (m_state == State::ROAM) ? 1.0f : 0.0f;
+	perception_vector[20] = (m_state == State::HUNT) ? 1.0f : 0.0f;
+	perception_vector[21] = (m_state == State::FLEE) ? 1.0f : 0.0f;
 	
 	// 5. Train the movement brain based on the correct state
 	train_brain(world, perception_vector, m_learning_rate);
@@ -151,8 +151,9 @@ std::vector<float> Agent::perceive(const Simulation& world)
 	m_follow_agent_pos = glm::vec3(0.0f);
 	m_threat_pos = glm::vec3(0.0f);
 
-	// The vector now has space for the state, which will be added in update()
-	std::vector<float> perception(17, 0.0f); // 4 food, 4 follow, 4 threat, 1 energy, 4 state
+	// The vector now has space for new sensors and the state, which will be added in update()
+	// 4 food, 4 follow, 4 threat, 1 energy, 3 boundary, 1 friendly, 1 hostile, 4 state
+	std::vector<float> perception(22, 0.0f);
 
 	glm::vec3 agent_pos = m_transform[3];
 	
@@ -202,12 +203,28 @@ std::vector<float> Agent::perceive(const Simulation& world)
 		}
 	}
 
-	// Find closest agents (threat, follow, prey)
+	// --- New Sensor: Local Agent Density ---
+	float friendly_agent_count = 0.0f;
+	float hostile_agent_count = 0.0f;
+
+	// Find closest agents (threat, follow, prey) AND calculate density
 	for (const auto& other : world.m_agents) {
 		if (&other == this) continue;
 		glm::vec3 other_pos = other.m_transform[3];
 		float dist_sq = glm::distance2(agent_pos, other_pos);
 
+		// Density Calculation
+		if (dist_sq < DENSITY_RADIUS_SQ) {
+			if (m_type == AgentType::FEEDER) {
+				if (other.m_type == AgentType::FEEDER) friendly_agent_count++;
+				else if (other.m_type == AgentType::PREDATOR) hostile_agent_count++;
+			} else { // PREDATOR
+				// For a predator, other predators are hostile competitors.
+				if (other.m_type == AgentType::PREDATOR) hostile_agent_count++;
+			}
+		}
+
+		// Closest agent logic
 		if (m_type == AgentType::FEEDER) {
 			// Feeder looks for predators (threat) and other feeders (follow)
 			if (other.m_type == AgentType::PREDATOR && dist_sq < detection_radius_sq) {
@@ -259,8 +276,8 @@ std::vector<float> Agent::perceive(const Simulation& world)
 	if (found_follow) m_follow_agent_pos = closest_follow_pos;
 	if (found_threat) m_threat_pos = closest_threat_pos;
 
-	// --- Fill Perception Vector for Movement Brain (Direction Vector & Distance) ---
-	// Food
+	// --- Fill Perception Vector for Movement Brain ---
+	// Food (Direction Vector & Distance)
 	if (found_food) {
 		glm::vec3 direction = closest_food_pos - agent_pos;
 		if (glm::length2(direction) > 1e-6f) {
@@ -304,6 +321,27 @@ std::vector<float> Agent::perceive(const Simulation& world)
 
 	// Own Energy
 	perception[12] = m_energy / 100.0f; // Normalize energy
+
+	// --- New Sensor: Boundary Avoidance ---
+	glm::vec3 boundary_avoidance_vec(0.0f);
+	float half_world_size = world.m_world_size / 2.0f;
+	if (agent_pos.x > half_world_size - BOUNDARY_THRESHOLD) boundary_avoidance_vec.x -= 1.0f;
+	if (agent_pos.x < -half_world_size + BOUNDARY_THRESHOLD) boundary_avoidance_vec.x += 1.0f;
+	if (agent_pos.y > half_world_size - BOUNDARY_THRESHOLD) boundary_avoidance_vec.y -= 1.0f;
+	if (agent_pos.y < -half_world_size + BOUNDARY_THRESHOLD) boundary_avoidance_vec.y += 1.0f;
+	if (agent_pos.z > half_world_size - BOUNDARY_THRESHOLD) boundary_avoidance_vec.z -= 1.0f;
+	if (agent_pos.z < -half_world_size + BOUNDARY_THRESHOLD) boundary_avoidance_vec.z += 1.0f;
+	
+	if (glm::length2(boundary_avoidance_vec) > 1e-6f) {
+		boundary_avoidance_vec = glm::normalize(boundary_avoidance_vec);
+	}
+	perception[13] = boundary_avoidance_vec.x;
+	perception[14] = boundary_avoidance_vec.y;
+	perception[15] = boundary_avoidance_vec.z;
+
+	// Agent Density (normalized by a reasonable max count to keep values small)
+	perception[16] = std::min(friendly_agent_count / 10.0f, 1.0f);
+	perception[17] = std::min(hostile_agent_count / 10.0f, 1.0f);
 
 	return perception;
 }
@@ -396,7 +434,6 @@ glm::vec3 Agent::find_closest_food_direction(const Simulation& world, size_t foo
 	return glm::vec3(0.0f); // Return zero vector if no food is found
 }
 
-
 // Teacher-forcing for the movement brain using the new directional sensor approach.
 void Agent::train_brain(const Simulation& world, const std::vector<float>& perception_vector, float learning_rate)
 {
@@ -429,10 +466,24 @@ void Agent::train_brain(const Simulation& world, const std::vector<float>& perce
 		case State::FLEE:
 			if (m_threat_pos != glm::vec3(0.0f)) {
 				glm::vec3 dir_to_threat = m_threat_pos - agent_pos;
+				glm::vec3 flee_from_threat_vec(0.0f);
 				if (glm::length2(dir_to_threat) > 1e-6f) {
-					// The ideal direction is away from the threat.
-					desired_direction = -glm::normalize(dir_to_threat);
+					flee_from_threat_vec = -glm::normalize(dir_to_threat);
+				}
+
+				// Get boundary avoidance vector from perception input
+				glm::vec3 boundary_avoidance_vec(perception_vector[13], perception_vector[14], perception_vector[15]);
+				
+				// Combine vectors - weight boundary avoidance slightly higher to prevent getting stuck
+				desired_direction = flee_from_threat_vec + (boundary_avoidance_vec * 1.5f);
+				
+				if (glm::length2(desired_direction) > 1e-6f) {
+					desired_direction = glm::normalize(desired_direction);
 					has_target = true;
+				} else {
+					// Fallback if vectors cancel out; just use the primary flee vector
+					desired_direction = flee_from_threat_vec;
+					has_target = (glm::length2(desired_direction) > 1e-6f);
 				}
 			}
 			break;
@@ -484,7 +535,6 @@ void Agent::train_brain(const Simulation& world, const std::vector<float>& perce
 	// --- Train the Brain ---
 	m_brain.train_step(perception_vector, target_params, learning_rate, ROTATION_WEIGHT);
 }
-
 
 // New function to train the state-selection RNN
 void Agent::train_state_brain(const Simulation& /* world */)

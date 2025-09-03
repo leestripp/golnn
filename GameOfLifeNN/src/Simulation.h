@@ -51,12 +51,12 @@ private:
     void spawn_food(size_t count, float food_area_scale, FoodType type = FoodType::VEGETABLE);
     void spawn_agents_internal(size_t count);
     void spawn_initial_agents(size_t count);
-
+	
     size_t m_food_spawn_timer; // Timer for food regrowth
 	
-	// Static variables for simulation parameters
-	static constexpr float MIN_DIST_TO_EAT_SQ = 1.0f;		// Squared distance to eat food (1 unit)
-	static constexpr float PREDATION_DISTANCE_SQ = 1.0f;	// Squared distance for a predator to attack (1 unit)
+	// S	tatic variables for simulation parameters
+	static constexpr float MIN_DIST_TO_EAT_SQ = 1.0f;			// Squared distance to eat food (1 unit)
+	static constexpr float PREDATION_DISTANCE_SQ = 1.0f;			// Squared distance for a predator to attack (1 unit)
 	// Predation is now a direct energy transfer. The drain from prey equals the gain for the predator.
 	static constexpr float PREDATION_ENERGY_TRANSFER = 20.0f;	// Energy transferred from prey to predator
 	// Limits

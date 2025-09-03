@@ -274,13 +274,16 @@ void Simulation::spawn_agents_internal(size_t count)
 			break;
 		}
 
-		// The perception vector has 17 inputs:
+		// The perception vector has 22 inputs:
 		// - Food: Direction vector (x, y, z) & distance (1) -> 4
 		// - Follow Agent: Direction vector (x, y, z) & distance (1) -> 4
 		// - Threat/Prey: Direction vector (x, y, z) & distance (1) -> 4
 		// - Own energy (1)
+		// - Boundary Avoidance Vector (x, y, z) -> 3
+		// - Friendly Agent Density (1)
+		// - Hostile Agent Density (1)
 		// - Current State (one-hot encoded) (4)
-		constexpr size_t perception_vector_size = 17;
+		constexpr size_t perception_vector_size = 22;
 
 		// Create a brain with a random number of layers and neurons.
 		int num_hidden_layers = layer_dist(gen);

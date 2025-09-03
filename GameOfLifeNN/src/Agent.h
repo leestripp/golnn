@@ -1,4 +1,3 @@
-
 #ifndef AGENT_H
 #define AGENT_H
 
@@ -93,8 +92,8 @@ private:
 	static constexpr float MUTATION_AMOUNT = 0.01f; // Max change during mutation
 	
 	// Agent Type Specific Parameters
-	static constexpr float FEEDER_ENERGY_DECAY = 0.05f;
-	static constexpr float PREDATOR_ENERGY_DECAY = 0.07f;
+	static constexpr float FEEDER_ENERGY_DECAY = 0.03f;
+	static constexpr float PREDATOR_ENERGY_DECAY = 0.05f;
 	
 	static constexpr float FEEDER_ENERGY_TO_REPRODUCE = 110.0f;
 	static constexpr float PREDATOR_ENERGY_TO_REPRODUCE = 110.0f;
@@ -104,6 +103,10 @@ private:
 	static constexpr float PREDATOR_DETECTION_RADIUS_SQ = 400.0f;	// 20 units squared
 	static constexpr float FEEDER_FOOD_DETECTION_RADIUS_SQ = 400.0f; // 20 units squared
 	static constexpr float PREDATOR_HUNT_RADIUS_SQ = 400.0f;		// 20 units squared
+
+	// New Sensor Parameters
+	static constexpr float BOUNDARY_THRESHOLD = 5.0f;
+	static constexpr float DENSITY_RADIUS_SQ = 25.0f; // 5 units squared
 };
 
 #endif // AGENT_H
