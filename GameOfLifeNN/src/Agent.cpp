@@ -126,7 +126,7 @@ void Agent::update(const Simulation& world)
 	train_brain(world, perception_vector);
 	
 	// 6. Get the next action from the movement brain and update transform
-	m_transform = m_brain.process_step(perception_vector);
+	m_transform = m_brain.process_step(perception_vector, MAX_SPEED);
 	
 	// 7. Apply gradients after accumulating for BATCH_SIZE steps
 	m_gradient_accumulation_step++;

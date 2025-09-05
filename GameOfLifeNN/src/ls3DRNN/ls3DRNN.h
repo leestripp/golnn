@@ -24,7 +24,8 @@ public:
 	ls3DRNN& operator=(ls3DRNN&& other) noexcept;
 	
 	void reset();
-	const glm::mat4& process_step(const vector<float>& command);
+	// The process_step function now takes a max_speed parameter to clamp the translation.
+	const glm::mat4& process_step(const vector<float>& command, float max_speed);
 	const glm::mat4& get_state() const;
 	
 	// Manually sets the hidden state of the RNN. Essential for Teacher Forcing.
@@ -51,7 +52,8 @@ private:
 	static constexpr size_t STATE_DIM = 16;
 	
 	vector<float> prepare_mlp_input(const vector<float>& command) const;
-	glm::mat4 create_transform_from_params(const vector<float>& params) const;
+	// This function also needs the max_speed parameter.
+	glm::mat4 create_transform_from_params(const vector<float>& params, float max_speed) const;
 };
 
 #endif // LS3DRNN_H

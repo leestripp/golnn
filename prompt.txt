@@ -41,27 +41,26 @@ Shifting from teaching the ls3DRNN an absolute target position to teaching it a 
 What other sensory input can you think of that would help our Agents out?
 Now check if the Predators are being trained on position or a direction for eating Feeder agents.
 If Predators are using absolute position, please change this to use a direction vector like we do with food.
-
-While direction to food and threats is a fantastic start, here are several other sensory inputs that could dramatically increase the behavioral complexity and "intelligence" of your agents:
-
-1.  **Boundary Avoidance Sensor:**
-    *   **What it is:** A sensor that provides a vector pointing away from the nearest world boundary when the agent gets too close.
-    *   **Input to Brain:** A 3D vector. If the agent is within a certain threshold (e.g., 5 units) of a boundary, the vector points directly away from it (e.g., if near the `+X` wall, the vector is `{-1, 0, 0}`). Otherwise, the vector is `{0, 0, 0}`.
-    *   **Why it's useful:** This would explicitly give the agents information about their container. They could learn to turn away from walls instead of getting stuck rubbing against them, leading to much more efficient navigation and exploration.
-
-2.  **Local Agent Density Sensor:**
-    *   **What it is:** A sensor that counts the number of "friendly" and "hostile" agents within a small, "personal space" radius.
-    *   **Input to Brain:** Two scalar values: `friendly_agent_count` and `hostile_agent_count` within a 5-unit radius, for example.
-    *   **Why it's useful:** This can lead to emergent social behaviors. Feeders might learn that a moderate density of other feeders is safe, encouraging flocking. A predator might learn to charge into a high density of feeders or avoid a high density of other predators. It's a fundamental component for collision avoidance and group dynamics.
-
-3.  **"Scent" Gradient Sensor:**
-    *   **What it is:** A more advanced sensor that detects trails left by other entities. The simulation would need to be modified so that food and agents leave invisible "scent markers" that decay over time. This sensor would provide a vector pointing in the direction of the strongest relevant scent.
-    *   **Input to Brain:** A 3D vector representing the scent gradient.
-    *   **Why it's useful:** This enables non-line-of-sight tracking. A predator could follow the recent path of a feeder, and a feeder could find a patch of food that's around a corner. This introduces a form of environmental memory and creates
-4.  **Auditory Sensor:**
-    *   **What it is:** A simplified "hearing" mechanism. Events like a predator attacking or a feeder eating could generate a "sound" at their location. Other agents within a large radius would "hear" it.
-    *   **Input to Brain:** A 3D vector pointing towards the source of the most recent or loudest sound, and perhaps a scalar value for the "type" of sound (e.g., 1.0 for danger, 0.5 for food).
-    *   **Why it's useful:** This provides long-range, omnidirectional information. A feeder could be alerted to danger far outside its visual range, and a predator could be drawn to the sound of other predators successfully hunting, potentially to steal the kill.
-How about using Batch Learning for lsRNN and ls3DRNN, for example lets collect all errors over 1 second (30 ticks). Then and only then apply backpropergation.
+Sensors:
+* Boundry detection.
+* Local Agent Density
+* Scent Gradient Sensor
 Can we prioitise FLEE for Feeders, they should only eat when they feel safe.
+Check MAX_SPEED is being applied correctly, we have some agents teleporting, moving very fast.
 
+Next Steps:
+
+1.  **Scent Gradient Sensor (as you suggested):** This is a fantastic idea for non-visual tracking.
+    *   **Implementation:** The world could contain a "scent map" (perhaps a 3D grid or a list of scent sources). Agents and food would periodically drop "scent particles" that diffuse and decay over time. The sensor would not see the source but would sample the scent map at several points around the agent to determine the gradient (the direction of increasing scent concentration).
+    *   **Input to Brain:** A 3D normalized vector representing the direction of the strongest scent.
+    *   **Benefit:** Allows predators to track prey even after losing sight and helps all agents find food that is hidden or far away. It creates more persistent hunting and foraging behaviors.
+
+2.  **Auditory Sensor:** A simplified way to detect activity.
+    *   **Implementation:** Actions like eating, attacking, or moving at high speed could generate a "sound event" at a specific location. This event propagates instantaneously to all agents within a certain radius.
+    *   **Input to Brain:** A 3D normalized vector pointing towards the loudest/closest sound source and a float for its intensity. If no sound is heard, the vector is zero.
+    *   **Benefit:** Feeders could be alerted to a predator attacking another agent, even if it's out of sight, triggering a `FLEE` response. Predators could be drawn to the sound of activity, hoping to find prey.
+
+4.  **Internal State Sensors:** Provide the brain with more self-awareness.
+    *   **Implementation:** Add normalized values for the agent's current `m_age` or a "hunger" metric (e.g., `1.0 - (m_energy / max_energy)`).
+    *   **Input to Brain:** One or two additional float values in the perception vector.
+    *   **Benefit:** An agent could learn to modify its behavior based on age, perhaps becoming less aggressive or taking fewer risks as it gets older to maximize its reproductive lifespan. A direct "hunger" input might lead to more urgent `HUNT` states than the binned energy level alone.

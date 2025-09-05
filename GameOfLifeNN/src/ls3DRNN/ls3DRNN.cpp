@@ -229,11 +229,11 @@ void ls3DRNN::mutate(float mutation_rate, float mutation_amount)
     m_cell->mutate(mutation_rate, mutation_amount);
 }
 
-const glm::mat4& ls3DRNN::process_step(const vector<float>& command)
+const glm::mat4& ls3DRNN::process_step(const vector<float>& command, float max_speed)
 {
 	vector<float> mlp_input = prepare_mlp_input(command);
 	vector<float> params = m_cell->forward(mlp_input);
-	glm::mat4 delta_transform = create_transform_from_params(params);
+	glm::mat4 delta_transform = create_transform_from_params(params, max_speed);
 	m_hidden_state = m_hidden_state * delta_transform;
 	return m_hidden_state;
 }
@@ -271,10 +271,21 @@ const glm::mat4& ls3DRNN::get_state() const
 	return m_hidden_state;
 }
 
-glm::mat4 ls3DRNN::create_transform_from_params(const vector<float>& params) const
+glm::mat4 ls3DRNN::create_transform_from_params(const vector<float>& params, float max_speed) const
 {
 	// params[0, 1, 2] are for translation
 	glm::vec3 translation(params[0], params[1], params[2]);
+
+	// --- MAX_SPEED Enforcement ---
+	// The raw output from the MLP for translation is unconstrained and can be very large,
+	// causing agents to "teleport". We must enforce the maximum speed limit here.
+	float speed = glm::length(translation);
+	if (speed > max_speed)
+	{
+		// If the desired movement exceeds max_speed, scale it down.
+		// glm::normalize is safe for zero-length vectors (it returns a zero vector).
+		translation = glm::normalize(translation) * max_speed;
+	}
 
 	// params[3, 4, 5, 6] are for the quaternion components (x, y, z, w)
 	// Create a quaternion from the MLP's output.
