@@ -52,6 +52,9 @@ void Simulation::tick() {
 	
 	// 3. Handle death and reproduction
 	cleanup_dead_agents_and_spawn_offspring();
+
+	// 4. Clear transient world data for the next tick
+	m_sound_events.clear();
 }
 
 void Simulation::handle_agent_interactions()
@@ -77,6 +80,7 @@ void Simulation::handle_agent_interactions()
 			if (can_eat && glm::distance2(agent_pos, m_food[i].position) < MIN_DIST_TO_EAT_SQ) {
 				agent.m_energy += 50.0f;
 				eaten_food_indices.push_back(i);
+				m_sound_events.push_back({m_food[i].position, 0.5f}); // Generate a quiet eating sound
 				break; // This agent has eaten, move to the next agent
 			}
 		}
@@ -111,6 +115,7 @@ void Simulation::handle_agent_interactions()
 			// An attack occurs on a feeder! Energy is transferred, not created.
 			predator.m_energy += PREDATION_ENERGY_TRANSFER;
 			closest_feeder_prey->m_energy -= PREDATION_ENERGY_TRANSFER;
+			m_sound_events.push_back({glm::vec3(closest_feeder_prey->m_transform[3]), 1.0f}); // Generate a loud attack sound
 			continue; // This predator has acted, move to the next one
 		}
 
@@ -133,6 +138,7 @@ void Simulation::handle_agent_interactions()
 			// An attack occurs on another predator! Energy is transferred.
 			predator.m_energy += PREDATION_ENERGY_TRANSFER;
 			closest_predator_prey->m_energy -= PREDATION_ENERGY_TRANSFER;
+			m_sound_events.push_back({glm::vec3(closest_predator_prey->m_transform[3]), 1.0f}); // Generate a loud attack sound
 		}
 	}
 }
@@ -148,7 +154,7 @@ void Simulation::cleanup_dead_agents_and_spawn_offspring()
 		std::vector<size_t> ls3d_hidden_dims = last_agent.m_brain.get_hidden_layer_dims();
 		size_t ls_hidden_dim = last_agent.get_state_brain_hidden_dim();
 		float learning_rate = last_agent.get_learning_rate();
-			
+		
 		std::cout << "\n--- Alpha Agent Died ---\n";
 		std::cout << "Type: " << agent_type_str << "\n";
 		std::cout << "Learning Rate: " << learning_rate << "\n";
@@ -170,6 +176,9 @@ void Simulation::cleanup_dead_agents_and_spawn_offspring()
 		std::cout << "Neurons per Layer: [ " << ls_hidden_dim << " ]\n";
 		
 		std::cout << "--------------------------\n" << std::endl;
+		
+		// Clear all food.
+		m_food.clear();
 	}
 	
 	std::vector<Agent> surviving_agents;
@@ -274,16 +283,8 @@ void Simulation::spawn_agents_internal(size_t count)
 			break;
 		}
 
-		// The perception vector has 22 inputs:
-		// - Food: Direction vector (x, y, z) & distance (1) -> 4
-		// - Follow Agent: Direction vector (x, y, z) & distance (1) -> 4
-		// - Threat/Prey: Direction vector (x, y, z) & distance (1) -> 4
-		// - Own energy (1)
-		// - Boundary Avoidance Vector (x, y, z) -> 3
-		// - Friendly Agent Density (1)
-		// - Hostile Agent Density (1)
-		// - Current State (one-hot encoded) (4)
-		constexpr size_t perception_vector_size = 22;
+		// The perception vector size is now defined in the Agent class.
+		constexpr size_t perception_vector_size = Agent::PERCEPTION_VECTOR_SIZE;
 
 		// Create a brain with a random number of layers and neurons.
 		int num_hidden_layers = layer_dist(gen);

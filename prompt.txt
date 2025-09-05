@@ -47,20 +47,19 @@ Sensors:
 * Scent Gradient Sensor
 Can we prioitise FLEE for Feeders, they should only eat when they feel safe.
 Check MAX_SPEED is being applied correctly, we have some agents teleporting, moving very fast.
-
-Next Steps:
-
 1.  **Scent Gradient Sensor (as you suggested):** This is a fantastic idea for non-visual tracking.
     *   **Implementation:** The world could contain a "scent map" (perhaps a 3D grid or a list of scent sources). Agents and food would periodically drop "scent particles" that diffuse and decay over time. The sensor would not see the source but would sample the scent map at several points around the agent to determine the gradient (the direction of increasing scent concentration).
     *   **Input to Brain:** A 3D normalized vector representing the direction of the strongest scent.
     *   **Benefit:** Allows predators to track prey even after losing sight and helps all agents find food that is hidden or far away. It creates more persistent hunting and foraging behaviors.
-
 2.  **Auditory Sensor:** A simplified way to detect activity.
     *   **Implementation:** Actions like eating, attacking, or moving at high speed could generate a "sound event" at a specific location. This event propagates instantaneously to all agents within a certain radius.
     *   **Input to Brain:** A 3D normalized vector pointing towards the loudest/closest sound source and a float for its intensity. If no sound is heard, the vector is zero.
     *   **Benefit:** Feeders could be alerted to a predator attacking another agent, even if it's out of sight, triggering a `FLEE` response. Predators could be drawn to the sound of activity, hoping to find prey.
-
 4.  **Internal State Sensors:** Provide the brain with more self-awareness.
     *   **Implementation:** Add normalized values for the agent's current `m_age` or a "hunger" metric (e.g., `1.0 - (m_energy / max_energy)`).
     *   **Input to Brain:** One or two additional float values in the perception vector.
     *   **Benefit:** An agent could learn to modify its behavior based on age, perhaps becoming less aggressive or taking fewer risks as it gets older to maximize its reproductive lifespan. A direct "hunger" input might lead to more urgent `HUNT` states than the binned energy level alone.
+Children should spawn at a small offset from the parent, to avoid population explosions.
+PREDATION_ENERGY_TRANSFER should not be set to high, Predators population can explode.
+
+Next Steps:

@@ -50,6 +50,12 @@ public:
 	glm::vec3 m_color; // Final color for visualization, adjusted for energy
 	AgentType m_type;  // The type of agent
  	
+	// The size of the perception vector fed into the movement brain (ls3DRNN).
+	// [0-11] Visual (Food, Threat, Friend), [12-19] Non-Visual (Scent, Sound)
+	// [20-22] Boundary, [23-24] Density, [25-26] Internal (Energy, Age)
+	// [27-30] State (one-hot)
+	static constexpr size_t PERCEPTION_VECTOR_SIZE = 31;
+
 	// State Brain Parameters
 	static constexpr size_t NUM_ENERGY_BINS = 4;
 	static constexpr size_t NUM_DISTANCE_BINS = 4;		// For enemy distance
@@ -99,8 +105,8 @@ private:
 	static constexpr float FEEDER_ENERGY_DECAY = 0.01f;
 	static constexpr float PREDATOR_ENERGY_DECAY = 0.03f;
 	
-	static constexpr float FEEDER_ENERGY_TO_REPRODUCE = 110.0f;
-	static constexpr float PREDATOR_ENERGY_TO_REPRODUCE = 110.0f;
+	static constexpr float FEEDER_ENERGY_TO_REPRODUCE = 130.0f;
+	static constexpr float PREDATOR_ENERGY_TO_REPRODUCE = 150.0f;
 	
 	// State transition parameters
 	static constexpr float ROAM_FOLLOW_RADIUS_SQ = 100.0f;			// units squared

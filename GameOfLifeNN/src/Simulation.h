@@ -19,6 +19,12 @@ struct Food {
     glm::vec3 position;
 };
 
+// A simple struct to represent a sound event in the world for one tick
+struct SoundEvent {
+    glm::vec3 position;
+    float intensity;
+};
+
 class Simulation
 {
 public:
@@ -36,6 +42,7 @@ public:
     // Agents and food are public so the main loop can access them for rendering
     std::vector<Agent> m_agents;
     std::vector<Food> m_food;
+    std::vector<SoundEvent> m_sound_events; // Holds sound events for the current tick
     const float m_world_size;
     std::mutex m_data_mutex; // Mutex to protect agent/food vectors during access
 	
@@ -58,7 +65,7 @@ private:
 	static constexpr float MIN_DIST_TO_EAT_SQ = 1.0f;			// Squared distance to eat food (1 unit)
 	static constexpr float PREDATION_DISTANCE_SQ = 1.0f;			// Squared distance for a predator to attack (1 unit)
 	// Predation is now a direct energy transfer. The drain from prey equals the gain for the predator.
-	static constexpr float PREDATION_ENERGY_TRANSFER = 20.0f;	// Energy transferred from prey to predator
+	static constexpr float PREDATION_ENERGY_TRANSFER = 5.0f;	// Energy transferred from prey to predator
 	// Limits
 	static constexpr size_t MAX_AGENTS = 1000;
 	static constexpr size_t MAX_FOOD = 1000;
