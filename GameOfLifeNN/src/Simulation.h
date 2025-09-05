@@ -32,7 +32,7 @@ public:
 	
     // The main function that runs one step of the simulation
     void tick();
-
+	
     // Spawns a specified number of new agents during runtime
     void spawn_new_agents(size_t count);
     // Spawns a specified number of new food items during runtime
@@ -48,8 +48,8 @@ public:
 	
     // --- Simulation Parameters ---
 	// Brain structure parameters for new agents
-	static constexpr int MAX_LAYER_COUNT = 12;
-	static constexpr int MAX_NEURON_COUNT = 96;
+	static constexpr int MAX_LAYER_COUNT = 10;
+	static constexpr int MAX_NEURON_COUNT = 64;
 	
 private:
     // Helper functions for the simulation loop
@@ -70,7 +70,7 @@ private:
 	static constexpr size_t MAX_AGENTS = 1000;
 	static constexpr size_t MAX_FOOD = 1000;
     // Food regrowth parameters
-    static constexpr size_t FOOD_SPAWN_INTERVAL_TICKS = 500; // Spawn food every N ticks
+    static constexpr size_t FOOD_SPAWN_INTERVAL_TICKS = 300; // Spawn food every N ticks
     static constexpr size_t FOOD_SPAWN_AMOUNT = 5;          // Number of food items to spawn
 };
 

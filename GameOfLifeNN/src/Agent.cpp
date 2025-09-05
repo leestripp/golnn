@@ -424,31 +424,35 @@ void Agent::update_state_transitions(const Simulation& /* world */)
 	
 	if(m_type == AgentType::FEEDER)
 	{
-		// Priority 1: Survival. If a threat is detected, FLEE.
-		if (m_threat_pos != glm::vec3(0.0f)) {
+		if(m_threat_pos != glm::vec3(0.0f))
+		{
+			// Priority 1: Survival. If a threat is detected, FLEE.
 			next_state = State::FLEE;
-		} 
-		// Priority 2: Sustenance. If safe and hungry, HUNT for food.
-		// Hunt if energy is below 90% of reproduction level, which is a better
-		// indicator of need than the arbitrary INITIAL_ENERGY.
-		else if (m_energy < FEEDER_ENERGY_TO_REPRODUCE * 0.9f) { 
+		} else if(m_energy < FEEDER_ENERGY_TO_REPRODUCE * 0.9f && m_food_pos != glm::vec3(0.0f))
+		{
+			// Priority 2: Sustenance. If safe and hungry, HUNT for food.
+			// Hunt if energy is below 90% of reproduction level, which is a better
+			// indicator of need than the arbitrary INITIAL_ENERGY.
 			next_state = State::HUNT;
-		} 
-		// Priority 3: Social/Exploration. If safe and not hungry, ROAM.
-		// Roaming is a more active and useful default state than IDLE.
-		else {
+		} else
+		{
+			// Priority 3: Social/Exploration. If safe and not hungry, ROAM.
+			// Roaming is a more active and useful default state than IDLE.
 			next_state = State::ROAM;
 		}
 	} else
 	{
 		// Predator Logic
-		if (m_threat_pos != glm::vec3(0.0f)) {
-			// Priority 1: Hunt other agents
+		if(m_threat_pos != glm::vec3(0.0f))
+		{
+			// Priority 1: Hunt other Feeder agents
 			next_state = State::HUNT;
-		} else if (m_food_pos != glm::vec3(0.0f) && m_energy < PREDATOR_ENERGY_TO_REPRODUCE * 0.8f) {
+		} else if(m_food_pos != glm::vec3(0.0f) && m_energy < PREDATOR_ENERGY_TO_REPRODUCE)
+		{
 			// Priority 2: Hunt for meat if hungry and no agents are seen
 			next_state = State::HUNT;
-		} else {
+		} else
+		{
 			// Otherwise, roam to find targets
 			next_state = State::ROAM;
 		}
@@ -491,72 +495,83 @@ glm::vec3 Agent::find_closest_food_direction(const Simulation& world, size_t foo
 // Teacher-forcing for the movement brain using the new directional sensor approach.
 void Agent::train_brain(const Simulation& world, const std::vector<float>& perception_vector)
 {
-	glm::vec3 desired_direction(0.0f);
+	glm::vec3 primary_direction(0.0f);
 	bool has_target = false;
 
 	glm::vec3 agent_pos = m_transform[3];
 
-	// Determine the ideal direction of movement based on the agent's state.
+	// Step 1: Determine the ideal PRIMARY direction based on state (the main goal).
 	switch (m_state) {
 		case State::HUNT:
 			if (m_type == AgentType::FEEDER) {
-				// Use the sensor function to find the direction to the nearest VEGETABLE.
-				desired_direction = find_closest_food_direction(world, FoodType::VEGETABLE);
+				primary_direction = find_closest_food_direction(world, FoodType::VEGETABLE);
 			} else { // PREDATOR
-				// Predators prioritize hunting other agents over scavenging.
 				if (m_threat_pos != glm::vec3(0.0f)) {
 					glm::vec3 dir_to_threat = m_threat_pos - agent_pos;
 					if (glm::length2(dir_to_threat) > 1e-6f) {
-						desired_direction = glm::normalize(dir_to_threat);
+						primary_direction = glm::normalize(dir_to_threat);
 					}
 				} else {
-					// If no agent prey is visible, hunt for MEAT.
-					desired_direction = find_closest_food_direction(world, FoodType::MEAT);
+					primary_direction = find_closest_food_direction(world, FoodType::MEAT);
 				}
 			}
-			has_target = (desired_direction != glm::vec3(0.0f));
+			has_target = (primary_direction != glm::vec3(0.0f));
 			break;
 
 		case State::FLEE:
 			if (m_threat_pos != glm::vec3(0.0f)) {
-				glm::vec3 dir_to_threat = m_threat_pos - agent_pos;
-				glm::vec3 flee_from_threat_vec(0.0f);
-				if (glm::length2(dir_to_threat) > 1e-6f) {
-					flee_from_threat_vec = -glm::normalize(dir_to_threat);
-				}
-
-				// Get boundary avoidance vector from perception input
-				glm::vec3 boundary_avoidance_vec(perception_vector[20], perception_vector[21], perception_vector[22]);
-				
-				// Combine vectors - weight boundary avoidance slightly higher to prevent getting stuck
-				desired_direction = flee_from_threat_vec + (boundary_avoidance_vec * 1.5f);
-				
-				if (glm::length2(desired_direction) > 1e-6f) {
-					desired_direction = glm::normalize(desired_direction);
-					has_target = true;
-				} else {
-					// Fallback if vectors cancel out; just use the primary flee vector
-					desired_direction = flee_from_threat_vec;
-					has_target = (glm::length2(desired_direction) > 1e-6f);
+				// Flee directly away from the threat.
+				glm::vec3 dir_from_threat = agent_pos - m_threat_pos;
+				if (glm::length2(dir_from_threat) > 1e-6f) {
+					primary_direction = glm::normalize(dir_from_threat);
 				}
 			}
+			has_target = (primary_direction != glm::vec3(0.0f));
 			break;
 
 		case State::ROAM:
 			 if (m_follow_agent_pos != glm::vec3(0.0f)) {
 				glm::vec3 dir_to_follow = m_follow_agent_pos - agent_pos;
 				if (glm::length2(dir_to_follow) > 1e-6f) {
-					desired_direction = glm::normalize(dir_to_follow);
+					primary_direction = glm::normalize(dir_to_follow);
 					has_target = true;
 				}
 			 }
+			 // If no target, primary_direction remains (0,0,0).
 			break;
 
 		case State::IDLE:
 		default:
-			// No specific target direction.
+			// No primary direction.
 			break;
 	}
+
+	// Step 2: Get the boundary avoidance vector from sensors.
+	glm::vec3 boundary_avoidance_vec(perception_vector[20], perception_vector[21], perception_vector[22]);
+	glm::vec3 desired_direction = primary_direction;
+
+	// Step 3: Combine the primary goal with boundary avoidance.
+	// This ensures the agent learns to curve away from walls instead of running into them.
+	if (glm::length2(boundary_avoidance_vec) > 1e-6f) {
+		// The weight makes avoidance a stronger influence than the primary goal when near a wall.
+		desired_direction += boundary_avoidance_vec * 1.5f;
+	}
+
+	// For ROAM without a follow target, the main goal IS to wander away from walls.
+	if (m_state == State::ROAM && !has_target) {
+		desired_direction = boundary_avoidance_vec;
+	}
+
+	// Step 4: Normalize the final direction vector.
+	if (glm::length2(desired_direction) > 1e-6f) {
+		desired_direction = glm::normalize(desired_direction);
+		has_target = true; // We now have a valid direction.
+	} else if (has_target) {
+		// Fallback in case the vectors perfectly cancel out; just use the primary goal.
+		desired_direction = primary_direction;
+		has_target = (glm::length2(desired_direction) > 1e-6f);
+	}
+
 
 	glm::vec3 agent_fwd = glm::normalize(glm::vec3(m_transform[2]));
 
@@ -591,7 +606,7 @@ void Agent::train_brain(const Simulation& world, const std::vector<float>& perce
 }
 
 // New function to train the state-selection RNN
-void Agent::train_state_brain(const Simulation& /* world */)
+void Agent::train_state_brain(const Simulation& world)
 {
 	// 1. Create input vector for the state brain.
 	std::vector<double> state_brain_input_vec;
@@ -614,9 +629,8 @@ void Agent::train_state_brain(const Simulation& /* world */)
 		distance_to_threat = glm::distance(glm::vec3(m_transform[3]), m_threat_pos);
 	}
 
-	float max_detection_radius = (m_type == AgentType::FEEDER) ? 
-								 sqrt(PREDATOR_DETECTION_RADIUS_SQ) : 
-								 sqrt(PREDATOR_HUNT_RADIUS_SQ);
+	// Use the dynamic detection radius for the binning
+	float max_detection_radius = world.m_world_size * 0.5f;
 	
 	float distance_ratio = std::clamp(distance_to_threat / max_detection_radius, 0.0f, 1.0f);
 	int distance_bin_index = static_cast<int>(distance_ratio * (NUM_DISTANCE_BINS - 0.0001f));
@@ -631,9 +645,7 @@ void Agent::train_state_brain(const Simulation& /* world */)
 		distance_to_food = glm::distance(glm::vec3(m_transform[3]), m_food_pos);
 	}
 	
-	// Use a general detection radius for food. PREDATOR_DETECTION_RADIUS_SQ is a good general "far" distance.
-	float max_food_detection_radius = sqrt(FEEDER_FOOD_DETECTION_RADIUS_SQ);
-	float food_distance_ratio = std::clamp(distance_to_food / max_food_detection_radius, 0.0f, 1.0f);
+	float food_distance_ratio = std::clamp(distance_to_food / max_detection_radius, 0.0f, 1.0f);
 	int food_distance_bin_index = static_cast<int>(food_distance_ratio * (NUM_FOOD_DISTANCE_BINS - 0.0001f));
 	food_distance_input_vec[food_distance_bin_index] = 1.0;
 	state_brain_input_vec.insert(state_brain_input_vec.end(), food_distance_input_vec.begin(), food_distance_input_vec.end());
@@ -691,9 +703,12 @@ Agent Agent::reproduce() {
     child_transform = glm::translate(child_transform, offset * 2.0f); // Offset by up to 2 units
 
 	// Create the new agent. Learning rate is randomized by passing -1.
+	// The child's state brain is also randomized.
 	Agent child(std::move(child_brain), child_transform, m_type, -1.0f, child_energy);
 	
-	// The child's state brain is newly initialized, it will learn on its own.
+	// Mutate the state brain as well
+	// NOTE: lsRNN does not have a mutate function, so the child gets a new random one.
+	// This is a valid evolutionary strategy.
+	
 	return child;
 }
-

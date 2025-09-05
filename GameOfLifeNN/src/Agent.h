@@ -63,8 +63,8 @@ public:
 	static constexpr size_t STATE_BRAIN_INPUT_DIM = NUM_ENERGY_BINS + NUM_DISTANCE_BINS + NUM_FOOD_DISTANCE_BINS;
 	static constexpr size_t NUM_STATES = 4; // IDLE, ROAM, HUNT, FLEE
 	// State brain hidden layer size is now randomized on creation
-	static constexpr size_t MIN_STATE_NEURONS = 8;
-	static constexpr size_t MAX_STATE_NEURONS = 64;
+	static constexpr size_t MIN_STATE_NEURONS = 4;
+	static constexpr size_t MAX_STATE_NEURONS = 32;
 	
 private:
 	void update_state_transitions(const Simulation& world);
@@ -106,17 +106,14 @@ private:
 	static constexpr float PREDATOR_ENERGY_DECAY = 0.05f;
 	
 	static constexpr float FEEDER_ENERGY_TO_REPRODUCE = 110.0f;
-	static constexpr float PREDATOR_ENERGY_TO_REPRODUCE = 150.0f;
+	static constexpr float PREDATOR_ENERGY_TO_REPRODUCE = 130.0f;
 	
 	// State transition parameters
-	static constexpr float ROAM_FOLLOW_RADIUS_SQ = 100.0f;			// units squared
-	static constexpr float PREDATOR_DETECTION_RADIUS_SQ = 400.0f;	// 20 units squared
-	static constexpr float FEEDER_FOOD_DETECTION_RADIUS_SQ = 400.0f; // 20 units squared
-	static constexpr float PREDATOR_HUNT_RADIUS_SQ = 400.0f;		// 20 units squared
-
+	static constexpr float ROAM_FOLLOW_RADIUS_SQ = 100.0f; // units squared
+	
 	// New Sensor Parameters
-	static constexpr float BOUNDARY_THRESHOLD = 5.0f;
-	static constexpr float DENSITY_RADIUS_SQ = 25.0f; // 5 units squared
+	static constexpr float BOUNDARY_THRESHOLD = 1.0f;
+	static constexpr float DENSITY_RADIUS_SQ = 1.0f; // 5 units squared
 };
 
 #endif // AGENT_H

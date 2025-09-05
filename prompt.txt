@@ -56,4 +56,4 @@ Children should spawn at a small offset from the parent, to avoid population exp
 PREDATION_ENERGY_TRANSFER should not be set to high, Predators population can explode.
 
 Next Steps:
-We need to go over all our sensors, check if they work correctly and fix any issues.
+Predators are sitting in the corners of the world in groups, NOT attacking Feeders. Why is this happening? I assume they are feeding off each other?

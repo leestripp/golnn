@@ -92,6 +92,8 @@ void Simulation::handle_agent_interactions()
 	}
 
 	// --- Phase 2: Predators act based on a strict priority list ---
+	// For each predator, we check for prey in a specific order. If an action is taken,
+	// we move to the next predator. This correctly models the priority.
 	for (auto* predator : predators) {
 		glm::vec3 predator_pos = glm::vec3(predator->m_transform[3]);
 		bool action_taken = false;
@@ -285,8 +287,6 @@ void Simulation::spawn_new_food(size_t count, float food_area_scale)
 	std::lock_guard<std::mutex> lock(m_data_mutex);
 	spawn_food(count, food_area_scale, FoodType::VEGETABLE);
 }
-
-
 
 
 // Public method to spawn agents at runtime. It's thread-safe.
