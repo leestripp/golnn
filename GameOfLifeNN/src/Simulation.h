@@ -48,8 +48,8 @@ public:
 	
     // --- Simulation Parameters ---
 	// Brain structure parameters for new agents
-	static constexpr int MAX_LAYER_COUNT = 10;
-	static constexpr int MAX_NEURON_COUNT = 64;
+	static constexpr int MAX_LAYER_COUNT = 12;
+	static constexpr int MAX_NEURON_COUNT = 96;
 	
 private:
     // Helper functions for the simulation loop

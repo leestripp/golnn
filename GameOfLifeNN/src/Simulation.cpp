@@ -57,91 +57,121 @@ void Simulation::tick() {
 	m_sound_events.clear();
 }
 
+
 void Simulation::handle_agent_interactions()
 {
-	// --- Phase 1: Agents eat food ---
-	std::vector<size_t> eaten_food_indices;
-	for(auto& agent : m_agents)
-	{
+	// Use a boolean vector for efficient O(1) lookup of eaten food.
+	std::vector<bool> food_eaten(m_food.size(), false);
+	std::vector<Agent*> predators;
+	std::vector<Agent*> feeders;
+
+	// Separate agents by type for cleaner and more efficient processing.
+	for (auto& agent : m_agents) {
 		if (agent.isDead()) continue;
+		if (agent.m_type == Agent::AgentType::PREDATOR) {
+			predators.push_back(&agent);
+		} else {
+			feeders.push_back(&agent);
+		}
+	}
 
-		glm::vec3 agent_pos = glm::vec3(agent.m_transform[3]);
-		for(size_t i = 0; i < m_food.size(); ++i)
-		{
-			// Check if food has already been marked for removal
-			if (std::find(eaten_food_indices.begin(), eaten_food_indices.end(), i) != eaten_food_indices.end()) {
-				continue;
-			}
+	// --- Phase 1: Feeders eat VEGETABLE food ---
+	// This is handled first as it's a simple, non-conflicting action.
+	for (auto* feeder : feeders) {
+		glm::vec3 agent_pos = glm::vec3(feeder->m_transform[3]);
+		for (size_t i = 0; i < m_food.size(); ++i) {
+			if (food_eaten[i] || m_food[i].m_food_type != FoodType::VEGETABLE) continue;
 
-			// Check if agent can eat this food type
-			bool can_eat = (agent.m_type == Agent::AgentType::FEEDER && m_food[i].m_food_type == FoodType::VEGETABLE) ||
-			               (agent.m_type == Agent::AgentType::PREDATOR && m_food[i].m_food_type == FoodType::MEAT);
-
-			if (can_eat && glm::distance2(agent_pos, m_food[i].position) < MIN_DIST_TO_EAT_SQ) {
-				agent.m_energy += 50.0f;
-				eaten_food_indices.push_back(i);
-				m_sound_events.push_back({m_food[i].position, 0.5f}); // Generate a quiet eating sound
-				break; // This agent has eaten, move to the next agent
+			if (glm::distance2(agent_pos, m_food[i].position) < MIN_DIST_TO_EAT_SQ) {
+				feeder->m_energy += 50.0f;
+				food_eaten[i] = true;
+				m_sound_events.push_back({m_food[i].position, 0.5f});
+				break; // Feeder has eaten, move to the next one.
 			}
 		}
 	}
-	
-	// Remove all eaten food at once. Sort indices descending to prevent invalidation.
-	std::sort(eaten_food_indices.rbegin(), eaten_food_indices.rend());
-	for (size_t index : eaten_food_indices) {
-		m_food.erase(m_food.begin() + index);
-	}
 
-	// --- Phase 2: Predators hunt ---
-	for (auto& predator : m_agents) {
-		if (predator.m_type != Agent::AgentType::PREDATOR || predator.isDead()) continue;
+	// --- Phase 2: Predators act based on a strict priority list ---
+	for (auto* predator : predators) {
+		glm::vec3 predator_pos = glm::vec3(predator->m_transform[3]);
+		bool action_taken = false;
 
-		glm::vec3 predator_pos = glm::vec3(predator.m_transform[3]);
+		// Priority 1: Hunt Feeders
 		Agent* closest_feeder_prey = nullptr;
 		float min_feeder_dist_sq = PREDATION_DISTANCE_SQ;
-
-		// First, prioritize finding the closest feeder in attack range
-		for (auto& potential_prey : m_agents) {
-			if (potential_prey.m_type != Agent::AgentType::FEEDER || potential_prey.isDead()) continue;
+		for (auto* potential_prey : feeders) {
+			if (potential_prey->isDead()) continue;
 			
-			float dist_sq = glm::distance2(predator_pos, glm::vec3(potential_prey.m_transform[3]));
+			float dist_sq = glm::distance2(predator_pos, glm::vec3(potential_prey->m_transform[3]));
 			if (dist_sq < min_feeder_dist_sq) {
 				min_feeder_dist_sq = dist_sq;
-				closest_feeder_prey = &potential_prey;
+				closest_feeder_prey = potential_prey;
 			}
 		}
 
 		if (closest_feeder_prey) {
-			// An attack occurs on a feeder! Energy is transferred, not created.
-			predator.m_energy += PREDATION_ENERGY_TRANSFER;
+			predator->m_energy += PREDATION_ENERGY_TRANSFER;
 			closest_feeder_prey->m_energy -= PREDATION_ENERGY_TRANSFER;
-			m_sound_events.push_back({glm::vec3(closest_feeder_prey->m_transform[3]), 1.0f}); // Generate a loud attack sound
-			continue; // This predator has acted, move to the next one
+			m_sound_events.push_back({glm::vec3(closest_feeder_prey->m_transform[3]), 1.0f});
+			action_taken = true;
 		}
 
-		// If no feeder was in range to be attacked, look for other predators
+		if (action_taken) continue; // Predator has acted, move to the next one.
+
+		// Priority 2: Eat Meat
+		int closest_meat_index = -1;
+		float min_meat_dist_sq = MIN_DIST_TO_EAT_SQ;
+		for (size_t i = 0; i < m_food.size(); ++i) {
+			if (food_eaten[i] || m_food[i].m_food_type != FoodType::MEAT) continue;
+
+			float dist_sq = glm::distance2(predator_pos, m_food[i].position);
+			if (dist_sq < min_meat_dist_sq) {
+				min_meat_dist_sq = dist_sq;
+				closest_meat_index = static_cast<int>(i);
+			}
+		}
+
+		if (closest_meat_index != -1) {
+			predator->m_energy += 50.0f;
+			food_eaten[closest_meat_index] = true;
+			m_sound_events.push_back({m_food[closest_meat_index].position, 0.5f});
+			action_taken = true;
+		}
+
+		if (action_taken) continue; // Predator has acted, move to the next one.
+
+		// Priority 3: Hunt other Predators (Cannibalism)
 		Agent* closest_predator_prey = nullptr;
 		float min_predator_dist_sq = PREDATION_DISTANCE_SQ;
-
-		for (auto& potential_prey : m_agents) {
-			// Can't attack itself, and must be a predator
-			if (&potential_prey == &predator || potential_prey.m_type != Agent::AgentType::PREDATOR || potential_prey.isDead()) continue;
+		for (auto* potential_prey : predators) {
+			if (potential_prey == predator || potential_prey->isDead()) continue;
 			
-			float dist_sq = glm::distance2(predator_pos, glm::vec3(potential_prey.m_transform[3]));
+			float dist_sq = glm::distance2(predator_pos, glm::vec3(potential_prey->m_transform[3]));
 			if (dist_sq < min_predator_dist_sq) {
 				min_predator_dist_sq = dist_sq;
-				closest_predator_prey = &potential_prey;
+				closest_predator_prey = potential_prey;
 			}
 		}
 
 		if (closest_predator_prey) {
-			// An attack occurs on another predator! Energy is transferred.
-			predator.m_energy += PREDATION_ENERGY_TRANSFER;
+			predator->m_energy += PREDATION_ENERGY_TRANSFER;
 			closest_predator_prey->m_energy -= PREDATION_ENERGY_TRANSFER;
-			m_sound_events.push_back({glm::vec3(closest_predator_prey->m_transform[3]), 1.0f}); // Generate a loud attack sound
+			m_sound_events.push_back({glm::vec3(closest_predator_prey->m_transform[3]), 1.0f});
 		}
 	}
+
+	// --- Phase 3: Remove all eaten food from the world ---
+	// This approach is safer and cleaner than erasing elements while iterating.
+	std::vector<Food> remaining_food;
+	remaining_food.reserve(m_food.size());
+	for (size_t i = 0; i < m_food.size(); ++i) {
+		if (!food_eaten[i]) {
+			remaining_food.push_back(m_food[i]);
+		}
+	}
+	m_food = std::move(remaining_food);
 }
+
 
 void Simulation::cleanup_dead_agents_and_spawn_offspring()
 {

@@ -10,16 +10,15 @@ Agent types:
 * Feeder: Standard agents, flee from Preditor aagents, feed and rest.
 Feeder Feeding distance: feeders must be closer then 1 unit from food to eat. But detect food 20 units away.
 Predator eating distance: predators must be closer the 1 unit from feeder agents to eat. But can detect them from 20 units away.
-Initial Random learning rates: Between 0.01 and 0.0005, to add more variation.
+Initial Random learning rates: Between 0.1 and 0.0001, to add more variation.
 Colours: Only set base colours, then adjust based on energy level. Bright = high energy. dark = low energy, as a factor.
 Predators Base Colour : Yellow (1.0f, 1.0f, 0.0f)
 Feeders Base Colour : Deep Blue (0.0f, 0.0f, 1.0f)
-Predators should eat each other if there isn't a Feeder to eat.
+Predators should eat in this order: 1. Eat Feeders, 2. Eat Meat, 3. Eat each other. It looks like this is wrong at the moment.
 Increase distance to find food for both Agents to World size * 0.5.
 ls3DRNN:
-We need to change how Teacher Forcing works. I'm thinking we chould now use sencors to find food direction and distance. Create a function to find food by TYPE based on Agent current position. It needs to be flexable to support both Types of agent. The function will return a normalized direction vector of the food. Now the key part, the ls3DRNN will only be taught the direction of the food, NOT the exact position.
-This should be more like the real world.
-Shifting from teaching the ls3DRNN an absolute target position to teaching it a directional vector based on sensory input is a much more robust and biologically plausible approach. This encourages the agent's brain to learn a mapping from its sensory inputs to a desired direction of movement, which is a more generalized skill.
+We need to change how Teacher Forcing works. I'm thinking we chould now use sencors to find food direction. Create a function to find food by TYPE based on Agent current position. It needs to be flexable to support both Types of agent. * The function will return a normalized direction vector of the food. Now the key part, the ls3DRNN will only be taught the direction of the food, NOT the exact position.
+* Shifting from teaching the ls3DRNN an absolute target position to teaching it a directional vector based on sensory input is a much more robust and biologically plausible approach.  movement,
 
 lsRNN:
 I've added lsRNN, to pick states based on Energy Level, distance to food and distance to enemy (predator).
@@ -29,37 +28,32 @@ Represent a vector of Energy, distance to food and distance to Enemy. Then feed 
 Teacher guided training. As we have the States we need. IDLE, HUNT, ROAM and FLEE.
 When Agents reproduce, double check agent count isn't to high (new agents + existing agents > MAX_AGENTS). We had an issue of population explosion at one point.
 Agents:
-* Inputs to the Agents ls3DRNN brai, give.position of food and enemy agents, It works better this way.
 Lets start feeding in the STATE result into the Agent ls3DRNN for better awareness of State.
-When a Feeder Agent dies, it will leave food type MEAT behind that predators can eat.
-We need to add food types. vegitable, meat. So feeders can only eat Vegies, Predators can only eat Meat and Feeder agents.
-Now that Feeders only get food at the start, we use a Timer to sumulate plants growing for food, so feeders have something to eat.
-When a Feeder agent dies, ve MUST check the Agents position isn't outside the world bounds before adding the MEAT food.
-If the Feeder agent is outside, Adjust the position of the MEAT (food) to be inside the bounds.
-Another version bump.
+When a Feeder Agent dies, it will leave food type MEAT behind that predators can eat. If this is dropped at the current position, Make sure its within the World bounds.
+We need to add food types. vegitable, meat.
+* So feeders can only eat Vegies.
+* Predators can only eat Feeders, Meat and Predator agents.
+Now that Feeders only get food at the start, we'll use a Timer to sumulate plants growing for food, so feeders have something to eat.
+When a Feeder agent dies, ve MUST check the Agents position isn't outside the world bounds before adding the MEAT food. OR shift the Meat position into the world bound.
 Shifting from teaching the ls3DRNN an absolute target position to teaching it a directional vector based on sensory input.
-What other sensory input can you think of that would help our Agents out?
 Now check if the Predators are being trained on position or a direction for eating Feeder agents.
 If Predators are using absolute position, please change this to use a direction vector like we do with food.
 Sensors:
-* Boundry detection.
-* Local Agent Density
-* Scent Gradient Sensor
-Can we prioitise FLEE for Feeders, they should only eat when they feel safe.
-Check MAX_SPEED is being applied correctly, we have some agents teleporting, moving very fast.
-1.  **Scent Gradient Sensor (as you suggested):** This is a fantastic idea for non-visual tracking.
-    *   **Implementation:** The world could contain a "scent map" (perhaps a 3D grid or a list of scent sources). Agents and food would periodically drop "scent particles" that diffuse and decay over time. The sensor would not see the source but would sample the scent map at several points around the agent to determine the gradient (the direction of increasing scent concentration).
-    *   **Input to Brain:** A 3D normalized vector representing the direction of the strongest scent.
-    *   **Benefit:** Allows predators to track prey even after losing sight and helps all agents find food that is hidden or far away. It creates more persistent hunting and foraging behaviors.
-2.  **Auditory Sensor:** A simplified way to detect activity.
+* Boundry detection. A Vector pointing away from the boundry edge.
+* Local Food Density. Point Food vector towards clumpped food.
+* Scent Gradient Sensor: The world could contain a "scent map" (perhaps a 3D grid or a list of scent sources). Agents and food would periodically drop "scent particles" that diffuse and decay over time. The sensor would not see the source but would sample the scent map at several points around the agent to determine the gradient (the direction of increasing scent concentration).
+* Auditory Sensor:** A simplified way to detect activity.
     *   **Implementation:** Actions like eating, attacking, or moving at high speed could generate a "sound event" at a specific location. This event propagates instantaneously to all agents within a certain radius.
     *   **Input to Brain:** A 3D normalized vector pointing towards the loudest/closest sound source and a float for its intensity. If no sound is heard, the vector is zero.
     *   **Benefit:** Feeders could be alerted to a predator attacking another agent, even if it's out of sight, triggering a `FLEE` response. Predators could be drawn to the sound of activity, hoping to find prey.
-4.  **Internal State Sensors:** Provide the brain with more self-awareness.
+* Internal State Sensors: Provide the brain with more self-awareness.
     *   **Implementation:** Add normalized values for the agent's current `m_age` or a "hunger" metric (e.g., `1.0 - (m_energy / max_energy)`).
     *   **Input to Brain:** One or two additional float values in the perception vector.
     *   **Benefit:** An agent could learn to modify its behavior based on age, perhaps becoming less aggressive or taking fewer risks as it gets older to maximize its reproductive lifespan. A direct "hunger" input might lead to more urgent `HUNT` states than the binned energy level alone.
+Can we prioitise FLEE for Feeders, they should only eat when they feel safe.
+Check MAX_SPEED is being applied correctly, we had some agents teleporting, moving very fast.
 Children should spawn at a small offset from the parent, to avoid population explosions.
 PREDATION_ENERGY_TRANSFER should not be set to high, Predators population can explode.
 
 Next Steps:
+We need to go over all our sensors, check if they work correctly and fix any issues.
