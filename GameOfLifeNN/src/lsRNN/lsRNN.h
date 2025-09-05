@@ -33,10 +33,11 @@ public:
 	void backpropagate(
 		const vector<vector<double>>& inputs,
 		const vector<vector<double>>& outputs,
-		const vector<vector<double>>& expected_outputs,
-		double learning_rate
+		const vector<vector<double>>& expected_outputs
 	);
 	
+	void apply_and_clear_gradients(double learning_rate, size_t batch_size);
+
 	// Loss functions are now part of the class
 	double get_loss_cross_entropy(const vector<double>& predicted, const vector<double>& expected);
 	double get_loss_mse(const vector<double>& predicted, const vector<double>& expected);
@@ -77,6 +78,13 @@ private:
 	// State and history
 	vector<double> h;
 	vector<vector<double>> m_h_history;
+
+	// Members for gradient accumulation
+	vector<vector<double>> m_dW_xh_acc;
+	vector<vector<double>> m_dW_hh_acc;
+	vector<vector<double>> m_dW_ho_acc;
+	vector<double> m_db_h_acc;
+	vector<double> m_db_o_acc;
 };
 
 #endif // LSRNN_H

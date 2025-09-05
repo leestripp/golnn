@@ -62,7 +62,7 @@ public:
 	
 private:
 	void update_state_transitions(const Simulation& world);
-	void train_brain(const Simulation& world, const std::vector<float>& perception_vector, float learning_rate);
+	void train_brain(const Simulation& world, const std::vector<float>& perception_vector);
 	void train_state_brain(const Simulation& world);
 	std::vector<float> perceive(const Simulation& world);
 	glm::vec3 find_closest_food_direction(const Simulation& world, size_t food_type) const;
@@ -78,7 +78,11 @@ private:
 	float m_learning_rate;	 // Each agent has its own learning rate
 	size_t m_state_brain_hidden_dim; // Number of neurons in the state brain's hidden layer
 	lsRNN m_state_brain;	   // New state-selection brain
-
+	
+	// batch learning
+	size_t m_gradient_accumulation_step;
+	static constexpr size_t BATCH_SIZE = 30; // Collect gradients for 30 ticks before updating
+	
 	// Simulation Parameters
 	static constexpr float INITIAL_ENERGY = 100.0f;
 	static constexpr int MAX_AGE = 5000;

@@ -33,7 +33,11 @@ public:
 	void mutate(float mutation_rate, float mutation_amount);
 	
 	vector<float> get_prediction(const vector<float>& command) const;
-	void train_step(const vector<float>& command, const vector<float>& target_params, float learning_rate, float rotation_weight);
+
+	// This function now only calculates and accumulates gradients for one step.
+	void train_step(const vector<float>& command, const vector<float>& target_params, float rotation_weight);
+	// This new function applies the accumulated gradients and resets them.
+	void apply_and_clear_gradients(float learning_rate, size_t batch_size);
 	
 	// Returns the dimensions of the hidden layers.
 	vector<size_t> get_hidden_layer_dims() const;

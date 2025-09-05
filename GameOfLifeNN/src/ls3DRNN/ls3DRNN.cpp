@@ -35,8 +35,20 @@ public:
 			}
 			m_weights.push_back(move(layer_weights));
 			m_biases.push_back(vector<float>(out_features, 0.0f));
-			m_weight_gradients.push_back(vector<vector<float>>(out_features, vector<float>(in_features, 0.0f)));
-			m_bias_gradients.push_back(vector<float>(out_features, 0.0f));
+			m_accumulated_weight_gradients.push_back(vector<vector<float>>(out_features, vector<float>(in_features, 0.0f)));
+			m_accumulated_bias_gradients.push_back(vector<float>(out_features, 0.0f));
+		}
+	}
+
+	void clear_gradients()
+	{
+		for (auto& layer_w_grad : m_accumulated_weight_gradients) {
+			for (auto& row : layer_w_grad) {
+				fill(row.begin(), row.end(), 0.0f);
+			}
+		}
+		for (auto& layer_b_grad : m_accumulated_bias_gradients) {
+			fill(layer_b_grad.begin(), layer_b_grad.end(), 0.0f);
 		}
 	}
 
@@ -44,8 +56,8 @@ public:
 	vector<vector<vector<float>>> m_weights;
 	vector<vector<float>> m_biases;
 	mutable vector<vector<float>> m_last_activations;
-	mutable vector<vector<vector<float>>> m_weight_gradients;
-	mutable vector<vector<float>> m_bias_gradients;
+	mutable vector<vector<vector<float>>> m_accumulated_weight_gradients;
+	mutable vector<vector<float>> m_accumulated_bias_gradients;
 
 	vector<float> forward(const vector<float>& input) const
 	{
@@ -99,10 +111,10 @@ public:
 
 			for(size_t j = 0; j < m_weights[i].size(); ++j)
 			{
-				m_bias_gradients[i][j] = delta_z[j];
+				m_accumulated_bias_gradients[i][j] += delta_z[j];
 				for(size_t k = 0; k < m_weights[i][j].size(); ++k)
 				{
-					m_weight_gradients[i][j][k] = delta_z[j] * prev_activations[k];
+					m_accumulated_weight_gradients[i][j][k] += delta_z[j] * prev_activations[k];
 				}
 			}
 
@@ -123,19 +135,23 @@ public:
 		}
 	}
 
-	void optimizer_step(float learning_rate)
+	void optimizer_step(float learning_rate, size_t batch_size)
 	{
+		if (batch_size == 0) return;
+		const float lr_per_sample = learning_rate / static_cast<float>(batch_size);
+
 		for(size_t i = 0; i < m_weights.size(); ++i)
 		{
 			for(size_t j = 0; j < m_weights[i].size(); ++j)
 			{
-				m_biases[i][j] -= learning_rate * m_bias_gradients[i][j];
+				m_biases[i][j] -= lr_per_sample * m_accumulated_bias_gradients[i][j];
 				for(size_t k = 0; k < m_weights[i][j].size(); ++k)
 				{
-					m_weights[i][j][k] -= learning_rate * m_weight_gradients[i][j][k];
+					m_weights[i][j][k] -= lr_per_sample * m_accumulated_weight_gradients[i][j][k];
 				}
 			}
 		}
+		clear_gradients();
 	}
 	
 	// Adjusts weights and biases by a random amount.
@@ -228,12 +244,16 @@ vector<float> ls3DRNN::get_prediction(const vector<float>& command) const
 	return m_cell->forward(mlp_input);
 }
 
-void ls3DRNN::train_step(const vector<float>& command, const vector<float>& target_params, float learning_rate, float rotation_weight)
+void ls3DRNN::train_step(const vector<float>& command, const vector<float>& target_params, float rotation_weight)
 {
 	vector<float> mlp_input = prepare_mlp_input(command);
 	m_cell->forward(mlp_input);
 	m_cell->backward(target_params, rotation_weight);
-	m_cell->optimizer_step(learning_rate);
+}
+
+void ls3DRNN::apply_and_clear_gradients(float learning_rate, size_t batch_size)
+{
+	m_cell->optimizer_step(learning_rate, batch_size);
 }
 
 void ls3DRNN::set_state(const glm::mat4& new_state)
@@ -286,4 +306,3 @@ vector<size_t> ls3DRNN::get_hidden_layer_dims() const
     // Return a sub-vector excluding the first (input) and last (output) elements.
     return vector<size_t>(all_dims.begin() + 1, all_dims.end() - 1);
 }
-

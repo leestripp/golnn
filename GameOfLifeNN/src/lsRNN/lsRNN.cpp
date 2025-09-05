@@ -102,10 +102,6 @@ void lsRNN::normalize(vector<double>& vec)
 }
 
 
-
-
-
-
 // lsRNN Constructor
 lsRNN::lsRNN(size_t input_dim, size_t hidden_dim, size_t output_dim, Task task) :
 	input_dim(input_dim),
@@ -124,6 +120,13 @@ lsRNN::lsRNN(size_t input_dim, size_t hidden_dim, size_t output_dim, Task task) 
 	for (auto& row : W_hh) { for (double& val : row) val = random_double(-0.5, 0.5); }
 	for (auto& row : W_ho) { for (double& val : row) val = random_double(-0.5, 0.5); }
 	
+	// Initialize gradient accumulators to zero
+	m_dW_xh_acc = vector<vector<double>>(hidden_dim, vector<double>(input_dim, 0.0));
+	m_dW_hh_acc = vector<vector<double>>(hidden_dim, vector<double>(hidden_dim, 0.0));
+	m_dW_ho_acc = vector<vector<double>>(output_dim, vector<double>(hidden_dim, 0.0));
+	m_db_h_acc = vector<double>(hidden_dim, 0.0);
+	m_db_o_acc = vector<double>(output_dim, 0.0);
+
 	h = vector<double>(hidden_dim, 0.0);
 	m_h_history.push_back(h);
 }
@@ -151,12 +154,6 @@ double lsRNN::get_loss_mse(const vector<double>& predicted, const vector<double>
 	}
 	return loss / predicted.size();
 }
-
-
-
-
-
-
 
 void lsRNN::reset_state()
 {
@@ -216,8 +213,7 @@ vector<double> lsRNN::forward_pass(const vector<double>& input_vector)
 void lsRNN::backpropagate(
 	const vector<vector<double>>& inputs,
 	const vector<vector<double>>& outputs,
-	const vector<vector<double>>& expected_outputs,
-	double learning_rate)
+	const vector<vector<double>>& expected_outputs)
 {
 	vector<vector<double>> dW_xh(hidden_dim, vector<double>(input_dim, 0.0));
 	vector<vector<double>> dW_hh(hidden_dim, vector<double>(hidden_dim, 0.0));
@@ -298,17 +294,44 @@ void lsRNN::backpropagate(
 	for (double& val : db_h) val = std::min(std::max(val, -clip_value), clip_value);
 	for (double& val : db_o) val = std::min(std::max(val, -clip_value), clip_value);
 	
+	// Accumulate gradients instead of applying them
 	for(size_t i = 0; i < hidden_dim; ++i)
 	{
-		for(size_t j = 0; j < input_dim; ++j) W_xh[i][j] -= learning_rate * dW_xh[i][j];
-		for(size_t j = 0; j < hidden_dim; ++j) W_hh[i][j] -= learning_rate * dW_hh[i][j];
-		b_h[i] -= learning_rate * db_h[i];
+		for(size_t j = 0; j < input_dim; ++j) m_dW_xh_acc[i][j] += dW_xh[i][j];
+		for(size_t j = 0; j < hidden_dim; ++j) m_dW_hh_acc[i][j] += dW_hh[i][j];
+		m_db_h_acc[i] += db_h[i];
 	}
 	
 	for(size_t i = 0; i < output_dim; ++i)
 	{
-		for(size_t j = 0; j < hidden_dim; ++j) W_ho[i][j] -= learning_rate * dW_ho[i][j];
-		b_o[i] -= learning_rate * db_o[i];
+		for(size_t j = 0; j < hidden_dim; ++j) m_dW_ho_acc[i][j] += dW_ho[i][j];
+		m_db_o_acc[i] += db_o[i];
 	}
 }
 
+void lsRNN::apply_and_clear_gradients(double learning_rate, size_t batch_size)
+{
+	if (batch_size == 0) return;
+	double lr_per_sample = learning_rate / static_cast<double>(batch_size);
+
+	// Apply accumulated gradients to weights
+	for(size_t i = 0; i < hidden_dim; ++i)
+	{
+		for(size_t j = 0; j < input_dim; ++j) W_xh[i][j] -= lr_per_sample * m_dW_xh_acc[i][j];
+		for(size_t j = 0; j < hidden_dim; ++j) W_hh[i][j] -= lr_per_sample * m_dW_hh_acc[i][j];
+		b_h[i] -= lr_per_sample * m_db_h_acc[i];
+	}
+	
+	for(size_t i = 0; i < output_dim; ++i)
+	{
+		for(size_t j = 0; j < hidden_dim; ++j) W_ho[i][j] -= lr_per_sample * m_dW_ho_acc[i][j];
+		b_o[i] -= lr_per_sample * m_db_o_acc[i];
+	}
+
+	// Reset accumulators to zero for the next batch
+	for (auto& row : m_dW_xh_acc) fill(row.begin(), row.end(), 0.0);
+	for (auto& row : m_dW_hh_acc) fill(row.begin(), row.end(), 0.0);
+	for (auto& row : m_dW_ho_acc) fill(row.begin(), row.end(), 0.0);
+	fill(m_db_h_acc.begin(), m_db_h_acc.end(), 0.0);
+	fill(m_db_o_acc.begin(), m_db_o_acc.end(), 0.0);
+}

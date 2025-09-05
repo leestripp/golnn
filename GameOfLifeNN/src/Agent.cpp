@@ -16,7 +16,7 @@
 // Random number generator for agent-specific properties like learning rate
 static std::random_device rd;
 static std::mt19937 agent_gen(rd());
-static std::uniform_real_distribution<float> lr_dist(0.0005f, 0.01f);
+static std::uniform_real_distribution<float> lr_dist(0.0001f, 0.1f);
 static std::uniform_real_distribution<float> mutation_chance_dist(0.0f, 1.0f);
 static std::uniform_int_distribution<size_t> state_neuron_dist(Agent::MIN_STATE_NEURONS, Agent::MAX_STATE_NEURONS);
 
@@ -52,7 +52,8 @@ Agent::Agent(ls3DRNN brain, const glm::mat4& initial_transform, AgentType type, 
 	m_threat_pos(0.0f),
 	m_energy_decay_rate(FEEDER_ENERGY_DECAY),
 	m_state_brain_hidden_dim(state_hidden_dim == 0 ? state_neuron_dist(agent_gen) : state_hidden_dim),
-	m_state_brain(STATE_BRAIN_INPUT_DIM, m_state_brain_hidden_dim, NUM_STATES, Task::CLASSIFICATION)
+	m_state_brain(STATE_BRAIN_INPUT_DIM, m_state_brain_hidden_dim, NUM_STATES, Task::CLASSIFICATION),
+	m_gradient_accumulation_step(0)
 {
 	// Ensure tokenizer is set up
 	initialize_tokenizer();
@@ -110,7 +111,7 @@ void Agent::update(const Simulation& world)
 	// 3. Determine the "correct" state based on rules (Teacher)
 	update_state_transitions(world);
 	
-	// 4. Train the state-selection brain to predict the correct state
+	// 4. Train the state-selection brain (accumulates gradients)
 	train_state_brain(world);
 	
 	// Add current state to the perception vector for the movement brain
@@ -121,13 +122,22 @@ void Agent::update(const Simulation& world)
 	perception_vector[20] = (m_state == State::HUNT) ? 1.0f : 0.0f;
 	perception_vector[21] = (m_state == State::FLEE) ? 1.0f : 0.0f;
 	
-	// 5. Train the movement brain based on the correct state
-	train_brain(world, perception_vector, m_learning_rate);
+	// 5. Train the movement brain based on the correct state (accumulates gradients)
+	train_brain(world, perception_vector);
 	
 	// 6. Get the next action from the movement brain and update transform
 	m_transform = m_brain.process_step(perception_vector);
 	
-	// 7. Enforce world boundaries
+	// 7. Apply gradients after accumulating for BATCH_SIZE steps
+	m_gradient_accumulation_step++;
+	if(m_gradient_accumulation_step >= BATCH_SIZE)
+	{
+		m_brain.apply_and_clear_gradients(m_learning_rate, BATCH_SIZE);
+		m_state_brain.apply_and_clear_gradients(m_learning_rate, BATCH_SIZE);
+		m_gradient_accumulation_step = 0;
+	}
+	
+	// 8. Enforce world boundaries
 	glm::vec3 current_pos = m_transform[3];
 	float half_world_size = world.m_world_size / 2.0f;
 	current_pos.x = std::clamp(current_pos.x, -half_world_size, half_world_size);
@@ -136,7 +146,7 @@ void Agent::update(const Simulation& world)
 	m_transform[3] = glm::vec4(current_pos, 1.0f);
 	m_brain.set_state(m_transform); // Keep brain state in sync after clamping
 	
-	// 8. Update color based on energy
+	// 9. Update color based on energy
 	float max_energy = (m_type == AgentType::PREDATOR) ? PREDATOR_ENERGY_TO_REPRODUCE : FEEDER_ENERGY_TO_REPRODUCE;
 	float energy_factor = std::clamp(m_energy / max_energy, 0.1f, 1.0f); // Clamp to avoid being invisible
 	m_color = m_base_color * energy_factor;
@@ -349,41 +359,24 @@ std::vector<float> Agent::perceive(const Simulation& world)
 // The "Teacher" - sets the correct state based on the agent's internal world model.
 void Agent::update_state_transitions(const Simulation& /* world */)
 {
-	// Start in IDLE mode
-	State next_state = State::IDLE;
+	State next_state;
 	
 	if(m_type == AgentType::FEEDER)
 	{
-		if(m_energy < INITIAL_ENERGY)
-		{
-			// Hungry
-			if(m_threat_pos == glm::vec3(0.0f))
-			{
-				// HUNT
-				next_state = State::HUNT;
-			} else
-			{
-				// ROAM
-				next_state = State::ROAM;
-			}
-		} else
-		{
-			// Not hungry
-			if(m_threat_pos == glm::vec3(0.0f))
-			{
-				// IDLE
-				next_state = State::IDLE;
-			} else
-			{
-				// FLEE
-				next_state = State::FLEE;
-			}
-		}
-		// Prioitise HUNT
-		if(m_energy < INITIAL_ENERGY * 0.75f)
-		{
-			// Fallback to HUNT
+		// Priority 1: Survival. If a threat is detected, FLEE.
+		if (m_threat_pos != glm::vec3(0.0f)) {
+			next_state = State::FLEE;
+		} 
+		// Priority 2: Sustenance. If safe and hungry, HUNT for food.
+		// Hunt if energy is below 90% of reproduction level, which is a better
+		// indicator of need than the arbitrary INITIAL_ENERGY.
+		else if (m_energy < FEEDER_ENERGY_TO_REPRODUCE * 0.9f) { 
 			next_state = State::HUNT;
+		} 
+		// Priority 3: Social/Exploration. If safe and not hungry, ROAM.
+		// Roaming is a more active and useful default state than IDLE.
+		else {
+			next_state = State::ROAM;
 		}
 	} else
 	{
@@ -435,7 +428,7 @@ glm::vec3 Agent::find_closest_food_direction(const Simulation& world, size_t foo
 }
 
 // Teacher-forcing for the movement brain using the new directional sensor approach.
-void Agent::train_brain(const Simulation& world, const std::vector<float>& perception_vector, float learning_rate)
+void Agent::train_brain(const Simulation& world, const std::vector<float>& perception_vector)
 {
 	glm::vec3 desired_direction(0.0f);
 	bool has_target = false;
@@ -533,7 +526,7 @@ void Agent::train_brain(const Simulation& world, const std::vector<float>& perce
 	target_params[6] = desired_rotation.w;
 
 	// --- Train the Brain ---
-	m_brain.train_step(perception_vector, target_params, learning_rate, ROTATION_WEIGHT);
+	m_brain.train_step(perception_vector, target_params, ROTATION_WEIGHT);
 }
 
 // New function to train the state-selection RNN
@@ -594,7 +587,7 @@ void Agent::train_state_brain(const Simulation& /* world */)
 	std::vector<double> predicted_output = m_state_brain.forward_pass(state_brain_input_vec);
 	std::vector<std::vector<double>> outputs_sequence = { predicted_output };
 	std::vector<std::vector<double>> expected_sequence = { target_state_vec };
-	m_state_brain.backpropagate(inputs_sequence, outputs_sequence, expected_sequence, m_learning_rate);
+	m_state_brain.backpropagate(inputs_sequence, outputs_sequence, expected_sequence);
 }
 
 float Agent::get_learning_rate() const
