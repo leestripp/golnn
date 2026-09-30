@@ -2,11 +2,15 @@
 
 // Utils.
 
-pair<double, double> lsRNN::find_min_max(const vector<double>& data)
+pair<float, float> lsRNN::find_min_max(const vector<float>& data)
 {
-	double min_val = numeric_limits<double>::max();
-	double max_val = numeric_limits<double>::min();
-	for(double val : data)
+	// Seed min high and max low so the first real value always wins.
+	// (lowest() = most negative, max() = most positive; the original code
+	// used min() = smallest positive, which broke all-negative data, and a
+	// later "fix" swapped the seeds so nothing ever updated them.)
+	float min_val = numeric_limits<float>::max();
+	float max_val = numeric_limits<float>::lowest();
+	for(float val : data)
 	{
 		if(val < min_val) min_val = val;
 		if(val > max_val) max_val = val;
@@ -15,17 +19,17 @@ pair<double, double> lsRNN::find_min_max(const vector<double>& data)
 }
 
 // Normalize a vector using Min-Max scaling
-vector<double> lsRNN::normalize_data(const vector<double>& data, double min_val, double max_val)
+vector<float> lsRNN::normalize_data(const vector<float>& data, float min_val, float max_val)
 {
-	vector<double> normalized_data(data.size());
-	double range = max_val - min_val;
-	
+	vector<float> normalized_data(data.size());
+	float range = max_val - min_val;
+
 	// Prevent division by zero.
-	if(range < 1e-9)
+	if(range < 1e-9f)
 	{
-		return vector<double>(data.size(), 0.0);
+		return vector<float>(data.size(), 0.0f);
 	}
-	
+
 	for(size_t i = 0; i < data.size(); i++)
 	{
 		normalized_data[i] = (data[i] - min_val) / range;
@@ -34,35 +38,35 @@ vector<double> lsRNN::normalize_data(const vector<double>& data, double min_val,
 }
 
 // Denormalize a value back to its original scale
-double lsRNN::denormalize_value(double normalized_val, double min_val, double max_val)
+float lsRNN::denormalize_value(float normalized_val, float min_val, float max_val)
 {
-	double range = max_val - min_val;
+	float range = max_val - min_val;
 	return normalized_val * range + min_val;
 }
 
 // definitions
-double lsRNN::random_double(double min, double max)
+float lsRNN::random_float(float min, float max)
 {
 	static random_device rd;
 	static mt19937 gen(rd());
-	uniform_real_distribution<> dis(min, max);
+	uniform_real_distribution<float> dis(min, max);
 	return dis(gen);
 }
 
-vector<double> lsRNN::create_random_vector(size_t size)
+vector<float> lsRNN::create_random_vector(size_t size)
 {
-	vector<double> vec(size);
+	vector<float> vec(size);
 	for(size_t i = 0; i < size; ++i)
 	{
-		vec[i] = random_double(-1.0, 1.0);
+		vec[i] = random_float(-1.0f, 1.0f);
 	}
 	return vec;
 }
 
-void lsRNN::softmax(vector<double>& vec)
+void lsRNN::softmax(vector<float>& vec)
 {
-	double max_val = -numeric_limits<double>::infinity();
-	for (double val : vec)
+	float max_val = -numeric_limits<float>::infinity();
+	for (float val : vec)
 	{
 		if (val > max_val)
 		{
@@ -70,31 +74,31 @@ void lsRNN::softmax(vector<double>& vec)
 		}
 	}
 
-	double sum = 0.0;
+	float sum = 0.0f;
 	for (size_t i = 0; i < vec.size(); ++i)
 	{
 		vec[i] = exp(vec[i] - max_val);
 		sum += vec[i];
 	}
-	
-	for (double& val : vec)
+
+	for (float& val : vec)
 	{
 		val /= sum;
 	}
 }
 
-void lsRNN::normalize(vector<double>& vec)
+void lsRNN::normalize(vector<float>& vec)
 {
-	double magnitude = 0.0;
-	for(double val : vec)
+	float magnitude = 0.0f;
+	for(float val : vec)
 	{
 		magnitude += val * val;
 	}
 	magnitude = sqrt(magnitude);
-	
-	if(magnitude > 1e-6)
+
+	if(magnitude > 1e-6f)
 	{
-		for(double& val : vec)
+		for(float& val : vec)
 		{
 			val /= magnitude;
 		}
@@ -103,61 +107,72 @@ void lsRNN::normalize(vector<double>& vec)
 
 
 // lsRNN Constructor
-lsRNN::lsRNN(size_t input_dim, size_t hidden_dim, size_t output_dim, Task task) :
-	input_dim(input_dim),
-	hidden_dim(hidden_dim),
-	output_dim(output_dim),
-	m_task(task)
+lsRNN::lsRNN(size_t in_dim, size_t hid_dim, size_t out_dim, Task task) :
+	input_dim(in_dim),
+	hidden_dim(hid_dim),
+	output_dim(out_dim),
+	m_task(task),
+	// Flat weight matrices, single allocation each
+	W_xh(hid_dim * in_dim),
+	W_hh(hid_dim * hid_dim),
+	W_ho(out_dim * hid_dim),
+	b_h(hid_dim, 0.0f),
+	b_o(out_dim, 0.0f),
+	// Scratch buffers, allocated once and reused every step
+	m_h_new(hid_dim),
+	m_output(out_dim),
+	m_d_output(out_dim),
+	m_d_h(hid_dim),
+	m_d_h_next(hid_dim),
+	m_d_h_raw(hid_dim),
+	m_dW_xh(hid_dim, vector<float>(in_dim, 0.0f)),
+	m_dW_hh(hid_dim, vector<float>(hid_dim, 0.0f)),
+	m_dW_ho(out_dim, vector<float>(hid_dim, 0.0f)),
+	m_db_h(hid_dim, 0.0f),
+	m_db_o(out_dim, 0.0f),
+	h(hid_dim, 0.0f),
+	m_dW_xh_acc(hid_dim * in_dim, 0.0f),
+	m_dW_hh_acc(hid_dim * hid_dim, 0.0f),
+	m_dW_ho_acc(out_dim * hid_dim, 0.0f),
+	m_db_h_acc(hid_dim, 0.0f),
+	m_db_o_acc(out_dim, 0.0f)
 {
-	// Initialize weights and biases with small random values
-	W_xh = vector<vector<double>>(hidden_dim, vector<double>(input_dim));
-	W_hh = vector<vector<double>>(hidden_dim, vector<double>(hidden_dim));
-	W_ho = vector<vector<double>>(output_dim, vector<double>(hidden_dim));
-	b_h = vector<double>(hidden_dim, 0.0);
-	b_o = vector<double>(output_dim, 0.0);
-	
-	for (auto& row : W_xh) { for (double& val : row) val = random_double(-0.5, 0.5); }
-	for (auto& row : W_hh) { for (double& val : row) val = random_double(-0.5, 0.5); }
-	for (auto& row : W_ho) { for (double& val : row) val = random_double(-0.5, 0.5); }
-	
-	// Initialize gradient accumulators to zero
-	m_dW_xh_acc = vector<vector<double>>(hidden_dim, vector<double>(input_dim, 0.0));
-	m_dW_hh_acc = vector<vector<double>>(hidden_dim, vector<double>(hidden_dim, 0.0));
-	m_dW_ho_acc = vector<vector<double>>(output_dim, vector<double>(hidden_dim, 0.0));
-	m_db_h_acc = vector<double>(hidden_dim, 0.0);
-	m_db_o_acc = vector<double>(output_dim, 0.0);
+	for (float& val : W_xh) val = random_float(-0.5f, 0.5f);
+	for (float& val : W_hh) val = random_float(-0.5f, 0.5f);
+	for (float& val : W_ho) val = random_float(-0.5f, 0.5f);
 
-	h = vector<double>(hidden_dim, 0.0);
+	m_h_history.reserve(64);
 	m_h_history.push_back(h);
 }
 
 // Loss functions are now member functions
-double lsRNN::get_loss_cross_entropy(const vector<double>& predicted, const vector<double>& expected)
+float lsRNN::get_loss_cross_entropy(const vector<float>& predicted, const vector<float>& expected)
 {
-	double loss = 0.0;
+	float loss = 0.0f;
 	for (size_t i = 0; i < predicted.size(); ++i)
 	{
-		if (expected[i] == 1.0)
+		if (expected[i] == 1.0f)
 		{
-			loss -= log(predicted[i] + 1e-9); // Add a small value to prevent log(0)
+			loss -= log(predicted[i] + 1e-9f); // Add a small value to prevent log(0)
 		}
 	}
 	return loss;
 }
 
-double lsRNN::get_loss_mse(const vector<double>& predicted, const vector<double>& expected)
+float lsRNN::get_loss_mse(const vector<float>& predicted, const vector<float>& expected)
 {
-	double loss = 0.0;
+	float loss = 0.0f;
 	for (size_t i = 0; i < predicted.size(); ++i)
 	{
-		loss += pow(predicted[i] - expected[i], 2);
+		const float diff = predicted[i] - expected[i];
+		loss += diff * diff;
 	}
-	return loss / predicted.size();
+	return loss / static_cast<float>(predicted.size());
 }
 
 void lsRNN::reset_state()
 {
-	h = vector<double>(hidden_dim, 0.0);
+	fill(h.begin(), h.end(), 0.0f);
 	m_h_history.clear();
 	m_h_history.push_back(h);
 }
@@ -165,173 +180,209 @@ void lsRNN::reset_state()
 void lsRNN::print_weights()
 {
 	cout << "### Hidden Layers:" << endl;
-	for(const auto& row : W_hh) {
+	const size_t rows = hidden_dim;
+	for(size_t i = 0; i < rows; ++i) {
 		cout << "[";
-		for(size_t i = 0; i < row.size(); ++i) {
-			cout << fixed << setprecision(4) << row[i] << (i < row.size() - 1 ? ", " : "");
+		const float* row = &W_hh[i * hidden_dim];
+		for(size_t j = 0; j < hidden_dim; ++j) {
+			cout << fixed << setprecision(4) << row[j] << (j < hidden_dim - 1 ? ", " : "");
 		}
 		cout << "]" << endl;
 	}
 }
 
-vector<double> lsRNN::forward_pass(const vector<double>& input_vector)
+const vector<float>& lsRNN::forward_pass(const vector<float>& input_vector)
 {
-	vector<double> h_new = b_h;
-	
+	// h_new = tanh(b_h + W_xh.x + W_hh.h), written into the reusable buffer.
 	for (size_t i = 0; i < hidden_dim; ++i) {
+		float sum = b_h[i];
+		const float* wxh_row = &W_xh[i * input_dim];
 		for (size_t j = 0; j < input_dim; ++j) {
-			h_new[i] += W_xh[i][j] * input_vector[j];
+			sum += wxh_row[j] * input_vector[j];
 		}
+		const float* whh_row = &W_hh[i * hidden_dim];
 		for (size_t j = 0; j < hidden_dim; ++j) {
-			h_new[i] += W_hh[i][j] * h[j];
+			sum += whh_row[j] * h[j];
 		}
+		m_h_new[i] = tanh(sum);
 	}
-	
-	for (double& val : h_new) {
-		val = tanh(val);
+
+	h = m_h_new;
+
+	// Bound the history: drop the oldest half once we exceed the cap so
+	// long-lived agents cannot grow this without limit.
+	if (m_h_history.size() >= MAX_HISTORY) {
+		m_h_history.erase(m_h_history.begin(), m_h_history.begin() + MAX_HISTORY / 2);
 	}
-	
-	h = h_new;
-	m_h_history.push_back(h_new);
-	
-	vector<double> output = b_o;
+	m_h_history.push_back(h);
+
+	// output = b_o + W_ho.h_new
 	for (size_t i = 0; i < output_dim; ++i) {
+		float sum = b_o[i];
+		const float* who_row = &W_ho[i * hidden_dim];
 		for (size_t j = 0; j < hidden_dim; ++j) {
-			output[i] += W_ho[i][j] * h_new[j];
+			sum += who_row[j] * m_h_new[j];
 		}
+		m_output[i] = sum;
 	}
-	
+
 	// Apply activation function based on the task
 	if (m_task == Task::CLASSIFICATION) {
-		softmax(output);
+		softmax(m_output);
 	}
 	// For regression, we use a linear output, so no activation is applied.
-	
-	return output;
+
+	return m_output;
 }
 
 void lsRNN::backpropagate(
-	const vector<vector<double>>& inputs,
-	const vector<vector<double>>& outputs,
-	const vector<vector<double>>& expected_outputs)
+	const vector<vector<float>>& inputs,
+	const vector<vector<float>>& outputs,
+	const vector<vector<float>>& expected_outputs
+)
 {
-	vector<vector<double>> dW_xh(hidden_dim, vector<double>(input_dim, 0.0));
-	vector<vector<double>> dW_hh(hidden_dim, vector<double>(hidden_dim, 0.0));
-	vector<vector<double>> dW_ho(output_dim, vector<double>(hidden_dim, 0.0));
-	vector<double> db_h(hidden_dim, 0.0);
-	vector<double> db_o(output_dim, 0.0);
-	
-	vector<double> d_h_next(hidden_dim, 0.0);
-	
-	for(int t = inputs.size() - 1; t >= 0; --t)
+	const size_t T = inputs.size();
+	if (T == 0) return;
+
+	// The history holds h BEFORE each step plus all intermediate states.
+	// We only need the last T+1 entries, which lets forward_pass run
+	// unbounded batches of steps between backprop calls.
+	if (T + 1 > m_h_history.size()) {
+		throw invalid_argument("lsRNN::backpropagate: input sequence longer than recorded history");
+	}
+	const size_t base = m_h_history.size() - T - 1; // m_h_history[base] is h BEFORE inputs[0]
+
+	// Zero the reused gradient scratch
+	for (auto& row : m_dW_xh) fill(row.begin(), row.end(), 0.0f);
+	for (auto& row : m_dW_hh) fill(row.begin(), row.end(), 0.0f);
+	for (auto& row : m_dW_ho) fill(row.begin(), row.end(), 0.0f);
+	fill(m_db_h.begin(), m_db_h.end(), 0.0f);
+	fill(m_db_o.begin(), m_db_o.end(), 0.0f);
+	fill(m_d_h_next.begin(), m_d_h_next.end(), 0.0f);
+
+	for(int t = static_cast<int>(T) - 1; t >= 0; --t)
 	{
-		vector<double> d_output(output_dim);
-		
+		const vector<float>& h_next = m_h_history[base + static_cast<size_t>(t) + 1];
+		const vector<float>& h_prev = m_h_history[base + static_cast<size_t>(t)];
+
 		// Calculate the output gradient based on the task
 		switch (m_task) {
 			case Task::CLASSIFICATION:
 				// For Softmax + Cross-Entropy Loss, the output gradient is simply predicted - expected
 				for(size_t i = 0; i < output_dim; ++i) {
-					d_output[i] = outputs[t][i] - expected_outputs[t][i];
+					m_d_output[i] = outputs[t][i] - expected_outputs[t][i];
 				}
 				break;
 			case Task::REGRESSION:
 				// For MSE loss, the output gradient is 2 * (predicted - expected)
 				for(size_t i = 0; i < output_dim; ++i) {
-					d_output[i] = 2 * (outputs[t][i] - expected_outputs[t][i]) / output_dim;
+					m_d_output[i] = 2.0f * (outputs[t][i] - expected_outputs[t][i]) / static_cast<float>(output_dim);
 				}
 				break;
 		}
-		
+
 		for(size_t i = 0; i < output_dim; ++i)
 		{
-			db_o[i] += d_output[i];
+			m_db_o[i] += m_d_output[i];
 			for(size_t j = 0; j < hidden_dim; ++j)
 			{
-				dW_ho[i][j] += d_output[i] * m_h_history[t+1][j];
+				m_dW_ho[i][j] += m_d_output[i] * h_next[j];
 			}
 		}
-		
-		vector<double> d_h(hidden_dim, 0.0);
+
+		fill(m_d_h.begin(), m_d_h.end(), 0.0f);
 		for(size_t i = 0; i < hidden_dim; ++i)
 		{
 			for(size_t j = 0; j < output_dim; ++j)
 			{
-				d_h[i] += d_output[j] * W_ho[j][i];
+				m_d_h[i] += m_d_output[j] * W_ho[j * hidden_dim + i];
 			}
 			for(size_t j = 0; j < hidden_dim; ++j)
 			{
-				d_h[i] += d_h_next[j] * W_hh[j][i];
+				m_d_h[i] += m_d_h_next[j] * W_hh[j * hidden_dim + i];
 			}
 		}
-		
-		vector<double> d_h_raw(hidden_dim);
+
 		for(size_t i = 0; i < hidden_dim; ++i)
 		{
-			d_h_raw[i] = d_h[i] * (1 - m_h_history[t+1][i] * m_h_history[t+1][i]);
+			m_d_h_raw[i] = m_d_h[i] * (1.0f - h_next[i] * h_next[i]);
 		}
-		
+
 		for(size_t i = 0; i < hidden_dim; ++i)
 		{
-			db_h[i] += d_h_raw[i];
+			m_db_h[i] += m_d_h_raw[i];
 			for(size_t j = 0; j < input_dim; ++j)
 			{
-				dW_xh[i][j] += d_h_raw[i] * inputs[t][j];
+				m_dW_xh[i][j] += m_d_h_raw[i] * inputs[t][j];
 			}
 			for(size_t j = 0; j < hidden_dim; ++j)
 			{
-				dW_hh[i][j] += d_h_raw[i] * m_h_history[t][j];
+				m_dW_hh[i][j] += m_d_h_raw[i] * h_prev[j];
 			}
 		}
-		
-		d_h_next = d_h_raw;
+
+		m_d_h_next = m_d_h_raw;
 	}
-	
-	double clip_value = 5.0;
-	for (auto& row : dW_xh) for(double& val : row) val = std::min(std::max(val, -clip_value), clip_value);
-	for (auto& row : dW_hh) for(double& val : row) val = std::min(std::max(val, -clip_value), clip_value);
-	for (auto& row : dW_ho) for(double& val : row) val = std::min(std::max(val, -clip_value), clip_value);
-	for (double& val : db_h) val = std::min(std::max(val, -clip_value), clip_value);
-	for (double& val : db_o) val = std::min(std::max(val, -clip_value), clip_value);
-	
+
+	constexpr float clip_value = 5.0f;
+	auto clip = [clip_value](float val) { return std::clamp(val, -clip_value, clip_value); };
+	for (float& val : m_db_o) val = clip(val);
+	for (float& val : m_db_h) val = clip(val);
+	for (auto& row : m_dW_xh) for(float& val : row) val = clip(val);
+	for (auto& row : m_dW_hh) for(float& val : row) val = clip(val);
+	for (auto& row : m_dW_ho) for(float& val : row) val = clip(val);
+
 	// Accumulate gradients instead of applying them
 	for(size_t i = 0; i < hidden_dim; ++i)
 	{
-		for(size_t j = 0; j < input_dim; ++j) m_dW_xh_acc[i][j] += dW_xh[i][j];
-		for(size_t j = 0; j < hidden_dim; ++j) m_dW_hh_acc[i][j] += dW_hh[i][j];
-		m_db_h_acc[i] += db_h[i];
+		for(size_t j = 0; j < input_dim; ++j) m_dW_xh_acc[i * input_dim + j] += m_dW_xh[i][j];
+		for(size_t j = 0; j < hidden_dim; ++j) m_dW_hh_acc[i * hidden_dim + j] += m_dW_hh[i][j];
+		m_db_h_acc[i] += m_db_h[i];
 	}
-	
+
 	for(size_t i = 0; i < output_dim; ++i)
 	{
-		for(size_t j = 0; j < hidden_dim; ++j) m_dW_ho_acc[i][j] += dW_ho[i][j];
-		m_db_o_acc[i] += db_o[i];
+		for(size_t j = 0; j < hidden_dim; ++j) m_dW_ho_acc[i * hidden_dim + j] += m_dW_ho[i][j];
+		m_db_o_acc[i] += m_db_o[i];
 	}
 }
 
-void lsRNN::apply_and_clear_gradients(double learning_rate, size_t batch_size)
+void lsRNN::train_step(const vector<float>& input, const vector<float>& expected_output)
+{
+	reset_state();
+	const vector<float>& predicted = forward_pass(input);
+
+	// Delegate to backpropagate() with reused length-1 sequence wrappers so
+	// the gradient math (including clipping) is identical to the batched
+	// path, without any per-call heap allocations.
+	m_seq_input[0] = input;
+	m_seq_output[0] = predicted;
+	m_seq_expected[0] = expected_output;
+	backpropagate(m_seq_input, m_seq_output, m_seq_expected);
+}
+
+void lsRNN::apply_and_clear_gradients(float learning_rate, size_t batch_size)
 {
 	if (batch_size == 0) return;
-	double lr_per_sample = learning_rate / static_cast<double>(batch_size);
+	const float lr_per_sample = learning_rate / static_cast<float>(batch_size);
 
 	// Apply accumulated gradients to weights
+	for(size_t i = 0; i < W_xh.size(); ++i) W_xh[i] -= lr_per_sample * m_dW_xh_acc[i];
+	for(size_t i = 0; i < W_hh.size(); ++i) W_hh[i] -= lr_per_sample * m_dW_hh_acc[i];
+	for(size_t i = 0; i < W_ho.size(); ++i) W_ho[i] -= lr_per_sample * m_dW_ho_acc[i];
 	for(size_t i = 0; i < hidden_dim; ++i)
 	{
-		for(size_t j = 0; j < input_dim; ++j) W_xh[i][j] -= lr_per_sample * m_dW_xh_acc[i][j];
-		for(size_t j = 0; j < hidden_dim; ++j) W_hh[i][j] -= lr_per_sample * m_dW_hh_acc[i][j];
 		b_h[i] -= lr_per_sample * m_db_h_acc[i];
 	}
-	
 	for(size_t i = 0; i < output_dim; ++i)
 	{
-		for(size_t j = 0; j < hidden_dim; ++j) W_ho[i][j] -= lr_per_sample * m_dW_ho_acc[i][j];
 		b_o[i] -= lr_per_sample * m_db_o_acc[i];
 	}
 
 	// Reset accumulators to zero for the next batch
-	for (auto& row : m_dW_xh_acc) fill(row.begin(), row.end(), 0.0);
-	for (auto& row : m_dW_hh_acc) fill(row.begin(), row.end(), 0.0);
-	for (auto& row : m_dW_ho_acc) fill(row.begin(), row.end(), 0.0);
-	fill(m_db_h_acc.begin(), m_db_h_acc.end(), 0.0);
-	fill(m_db_o_acc.begin(), m_db_o_acc.end(), 0.0);
+	fill(m_dW_xh_acc.begin(), m_dW_xh_acc.end(), 0.0f);
+	fill(m_dW_hh_acc.begin(), m_dW_hh_acc.end(), 0.0f);
+	fill(m_dW_ho_acc.begin(), m_dW_ho_acc.end(), 0.0f);
+	fill(m_db_h_acc.begin(), m_db_h_acc.end(), 0.0f);
+	fill(m_db_o_acc.begin(), m_db_o_acc.end(), 0.0f);
 }

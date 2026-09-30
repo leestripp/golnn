@@ -46,12 +46,15 @@ public:
 private:
 	glm::mat4 m_hidden_state;
 	unique_ptr<ls3DRNN_MLP_Private> m_cell;
+	// Reused input assembly buffer (command + flattened transform), avoids a
+	// fresh heap allocation on every process_step/get_prediction/train_step.
+	mutable vector<float> m_mlp_input;
 	
 	// Updated: The MLP now outputs 3 translation values and 4 quaternion values.
 	static constexpr size_t MLP_OUTPUT_DIM = 7;
 	static constexpr size_t STATE_DIM = 16;
 	
-	vector<float> prepare_mlp_input(const vector<float>& command) const;
+	void prepare_mlp_input(const vector<float>& command, vector<float>& out) const;
 	// This function also needs the max_speed parameter.
 	glm::mat4 create_transform_from_params(const vector<float>& params, float max_speed) const;
 };

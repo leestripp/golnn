@@ -27,64 +27,98 @@ enum class Task {
 class lsRNN
 {
 public:
+	// All math is done in single precision: the simulation tolerates it,
+	// it halves memory traffic, and it vectorizes better.
+	using value_type = float;
+
 	explicit lsRNN(size_t input_dim, size_t hidden_dim, size_t output_dim, Task task);
-	
-	vector<double> forward_pass(const vector<double>& input_vector);
+
+	// Forward pass. Returns a reference to an internal output buffer that is
+	// overwritten by the next forward_pass call - copy it if you need to keep it.
+	const vector<float>& forward_pass(const vector<float>& input_vector);
 	void backpropagate(
-		const vector<vector<double>>& inputs,
-		const vector<vector<double>>& outputs,
-		const vector<vector<double>>& expected_outputs
+		const vector<vector<float>>& inputs,
+		const vector<vector<float>>& outputs,
+		const vector<vector<float>>& expected_outputs
 	);
-	
-	void apply_and_clear_gradients(double learning_rate, size_t batch_size);
+
+	// Single-step training convenience: reset_state + forward + backpropagate
+	// for a length-1 sequence without any per-call vector allocations.
+	void train_step(const vector<float>& input, const vector<float>& expected_output);
+
+	void apply_and_clear_gradients(float learning_rate, size_t batch_size);
 
 	// Loss functions are now part of the class
-	double get_loss_cross_entropy(const vector<double>& predicted, const vector<double>& expected);
-	double get_loss_mse(const vector<double>& predicted, const vector<double>& expected);
-	
+	float get_loss_cross_entropy(const vector<float>& predicted, const vector<float>& expected);
+	float get_loss_mse(const vector<float>& predicted, const vector<float>& expected);
+
 	void reset_state();
-	
+
 	// Utils.
-	pair<double, double> find_min_max(const vector<double>& data);
-	vector<double> normalize_data(const vector<double>& data, double min_val, double max_val);
-	double denormalize_value(double normalized_val, double min_val, double max_val);
-	
+	pair<float, float> find_min_max(const vector<float>& data);
+	vector<float> normalize_data(const vector<float>& data, float min_val, float max_val);
+	float denormalize_value(float normalized_val, float min_val, float max_val);
+
 	// debug
 	void print_weights();
-	
+
 private:
 	// Utility functions
-	double random_double(double min, double max);
-	vector<double> create_random_vector(size_t size);
-	
+	float random_float(float min, float max);
+	vector<float> create_random_vector(size_t size);
+
 	// Activations
-	void softmax(vector<double>& vec);
-	void normalize(vector<double>& vec);
-	
+	void softmax(vector<float>& vec);
+	void normalize(vector<float>& vec);
+
 	// Dimensions
 	size_t input_dim;
 	size_t hidden_dim;
 	size_t output_dim;
 	Task m_task; // Private member to store the task type
-	
-	// Weights and biases
-	vector<vector<double>> W_hh;
-	vector<vector<double>> W_xh;
-	vector<vector<double>> W_ho;
-	
-	vector<double> b_h;
-	vector<double> b_o;
-	
-	// State and history
-	vector<double> h;
-	vector<vector<double>> m_h_history;
 
-	// Members for gradient accumulation
-	vector<vector<double>> m_dW_xh_acc;
-	vector<vector<double>> m_dW_hh_acc;
-	vector<vector<double>> m_dW_ho_acc;
-	vector<double> m_db_h_acc;
-	vector<double> m_db_o_acc;
+	// Weights and biases, stored as flat row-major arrays.
+	// Element (i, j) of W_xh lives at W_xh[i * input_dim + j], etc.
+	// One allocation per matrix instead of a vector of vectors.
+	vector<float> W_xh; // hidden_dim * input_dim
+	vector<float> W_hh; // hidden_dim * hidden_dim
+	vector<float> W_ho; // output_dim * hidden_dim
+
+	vector<float> b_h; // hidden_dim
+	vector<float> b_o; // output_dim
+
+	// Reused scratch buffers: forward_pass/backpropagate write into these
+	// instead of allocating fresh vectors every call.
+	mutable vector<float> m_h_new;   // hidden_dim
+	mutable vector<float> m_output;  // output_dim
+	mutable vector<float> m_d_output;    // output_dim
+	mutable vector<float> m_d_h;         // hidden_dim
+	mutable vector<float> m_d_h_next;    // hidden_dim
+	mutable vector<float> m_d_h_raw;     // hidden_dim
+	mutable vector<vector<float>> m_dW_xh; // hidden_dim x input_dim
+	mutable vector<vector<float>> m_dW_hh; // hidden_dim x hidden_dim
+	mutable vector<vector<float>> m_dW_ho; // output_dim x hidden_dim
+	mutable vector<float> m_db_h;        // hidden_dim
+	mutable vector<float> m_db_o;        // output_dim
+
+	// Reused length-1 sequence wrappers for train_step().
+	mutable vector<vector<float>> m_seq_input{ vector<float>{} };
+	mutable vector<vector<float>> m_seq_output{ vector<float>{} };
+	mutable vector<vector<float>> m_seq_expected{ vector<float>{} };
+
+	// State and history. The history is bounded: without a cap, forward_pass
+	// appends forever and long-lived agents leak memory. backpropagate()
+	// always reads the LAST inputs.size() steps of history.
+	vector<float> h;
+	vector<vector<float>> m_h_history;
+	static constexpr size_t MAX_HISTORY = 1024; // steps; older entries are dropped
+
+	// Members for gradient accumulation (same flat layouts as the weights)
+	vector<float> m_dW_xh_acc;
+	vector<float> m_dW_hh_acc;
+	vector<float> m_dW_ho_acc;
+	vector<float> m_db_h_acc;
+	vector<float> m_db_o_acc;
 };
 
 #endif // LSRNN_H

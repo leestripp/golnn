@@ -21,6 +21,10 @@ static std::uniform_int_distribution<int> neuron_dist(4, Simulation::MAX_NEURON_
 
 Simulation::Simulation(size_t initial_agents, size_t initial_food, float world_size)
 	: m_world_size(world_size),
+	m_feeder_grid(world_size, SPATIAL_CELL_SIZE),
+	m_predator_grid(world_size, SPATIAL_CELL_SIZE),
+	m_vegetable_grid(world_size, SPATIAL_CELL_SIZE),
+	m_meat_grid(world_size, SPATIAL_CELL_SIZE),
 	m_food_spawn_timer(0)
 {
 	// Initialize with a few agents and some food
@@ -41,12 +45,19 @@ void Simulation::tick() {
         m_food_spawn_timer = 0;
     }
 	
+	// Rebuild the spatial indices for this tick (O(n)). All proximity queries
+	// in perceive()/handle_agent_interactions() hit these instead of O(n) scans.
+	rebuild_spatial_grids();
+
 	// 1. Update each agent
 	for(auto& agent : m_agents)
 	{
 		agent.update(*this);
 	}
-	
+
+	// Agents moved during update: refresh the agent grid for interactions.
+	rebuild_spatial_grids();
+
 	// 2. Handle interactions (eating, predation)
 	handle_agent_interactions();
 	
@@ -55,6 +66,33 @@ void Simulation::tick() {
 
 	// 4. Clear transient world data for the next tick
 	m_sound_events.clear();
+}
+
+
+void Simulation::rebuild_spatial_grids()
+{
+	m_feeder_grid.clear();
+	m_predator_grid.clear();
+	for (size_t i = 0; i < m_agents.size(); ++i)
+	{
+		// Dead agents are skipped by the query sites, but keeping them out of
+		// the grid entirely is cheaper.
+		if (m_agents[i].isDead()) continue;
+		if (m_agents[i].m_type == Agent::AgentType::FEEDER)
+			m_feeder_grid.insert(glm::vec3(m_agents[i].m_transform[3]), i);
+		else
+			m_predator_grid.insert(glm::vec3(m_agents[i].m_transform[3]), i);
+	}
+
+	m_vegetable_grid.clear();
+	m_meat_grid.clear();
+	for (size_t i = 0; i < m_food.size(); ++i)
+	{
+		if (m_food[i].m_food_type == FoodType::VEGETABLE)
+			m_vegetable_grid.insert(m_food[i].position, i);
+		else
+			m_meat_grid.insert(m_food[i].position, i);
+	}
 }
 
 
@@ -77,18 +115,20 @@ void Simulation::handle_agent_interactions()
 
 	// --- Phase 1: Feeders eat VEGETABLE food ---
 	// This is handled first as it's a simple, non-conflicting action.
+	// Eating radius is 1 unit, far below the grid cell size, so each feeder
+	// only inspects its own cell (plus a boundary ring).
+	const float eat_radius = sqrt(MIN_DIST_TO_EAT_SQ);
 	for (auto* feeder : feeders) {
 		glm::vec3 agent_pos = glm::vec3(feeder->m_transform[3]);
-		for (size_t i = 0; i < m_food.size(); ++i) {
-			if (food_eaten[i] || m_food[i].m_food_type != FoodType::VEGETABLE) continue;
+		m_vegetable_grid.visit(agent_pos, eat_radius, [&](size_t i) {
+			if (food_eaten[i]) return;
 
 			if (glm::distance2(agent_pos, m_food[i].position) < MIN_DIST_TO_EAT_SQ) {
 				feeder->m_energy += 50.0f;
 				food_eaten[i] = true;
 				m_sound_events.push_back({m_food[i].position, 0.5f});
-				break; // Feeder has eaten, move to the next one.
 			}
-		}
+		});
 	}
 
 	// --- Phase 2: Predators act based on a strict priority list ---
@@ -101,15 +141,16 @@ void Simulation::handle_agent_interactions()
 		// Priority 1: Hunt Feeders
 		Agent* closest_feeder_prey = nullptr;
 		float min_feeder_dist_sq = PREDATION_DISTANCE_SQ;
-		for (auto* potential_prey : feeders) {
-			if (potential_prey->isDead()) continue;
-			
+		m_feeder_grid.visit(predator_pos, sqrt(PREDATION_DISTANCE_SQ), [&](size_t i) {
+			Agent* potential_prey = &m_agents[i];
+			if (potential_prey->isDead()) return;
+
 			float dist_sq = glm::distance2(predator_pos, glm::vec3(potential_prey->m_transform[3]));
 			if (dist_sq < min_feeder_dist_sq) {
 				min_feeder_dist_sq = dist_sq;
 				closest_feeder_prey = potential_prey;
 			}
-		}
+		});
 
 		if (closest_feeder_prey) {
 			predator->m_energy += PREDATION_ENERGY_TRANSFER;
@@ -123,15 +164,15 @@ void Simulation::handle_agent_interactions()
 		// Priority 2: Eat Meat
 		int closest_meat_index = -1;
 		float min_meat_dist_sq = MIN_DIST_TO_EAT_SQ;
-		for (size_t i = 0; i < m_food.size(); ++i) {
-			if (food_eaten[i] || m_food[i].m_food_type != FoodType::MEAT) continue;
+		m_meat_grid.visit(predator_pos, eat_radius, [&](size_t i) {
+			if (food_eaten[i]) return;
 
 			float dist_sq = glm::distance2(predator_pos, m_food[i].position);
 			if (dist_sq < min_meat_dist_sq) {
 				min_meat_dist_sq = dist_sq;
 				closest_meat_index = static_cast<int>(i);
 			}
-		}
+		});
 
 		if (closest_meat_index != -1) {
 			predator->m_energy += 50.0f;
@@ -145,15 +186,16 @@ void Simulation::handle_agent_interactions()
 		// Priority 3: Hunt other Predators (Cannibalism)
 		Agent* closest_predator_prey = nullptr;
 		float min_predator_dist_sq = PREDATION_DISTANCE_SQ;
-		for (auto* potential_prey : predators) {
-			if (potential_prey == predator || potential_prey->isDead()) continue;
-			
+		m_predator_grid.visit(predator_pos, sqrt(PREDATION_DISTANCE_SQ), [&](size_t i) {
+			Agent* potential_prey = &m_agents[i];
+			if (potential_prey == predator || potential_prey->isDead()) return;
+
 			float dist_sq = glm::distance2(predator_pos, glm::vec3(potential_prey->m_transform[3]));
 			if (dist_sq < min_predator_dist_sq) {
 				min_predator_dist_sq = dist_sq;
 				closest_predator_prey = potential_prey;
 			}
-		}
+		});
 
 		if (closest_predator_prey) {
 			predator->m_energy += PREDATION_ENERGY_TRANSFER;

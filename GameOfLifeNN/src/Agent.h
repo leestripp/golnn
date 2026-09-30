@@ -66,12 +66,16 @@ public:
 	static constexpr size_t MIN_STATE_NEURONS = 4;
 	static constexpr size_t MAX_STATE_NEURONS = 32;
 	
+	std::vector<float> m_perception; // scratch, reused every tick by perceive()
+	std::vector<float> m_state_input_scratch; // scratch, reused every tick by train_state_brain()
+
 private:
 	void update_state_transitions(const Simulation& world);
-	void train_brain(const Simulation& world, const std::vector<float>& perception_vector);
+	void train_brain(const std::vector<float>& perception_vector);
 	void train_state_brain(const Simulation& world);
-	std::vector<float> perceive(const Simulation& world);
-	glm::vec3 find_closest_food_direction(const Simulation& world, size_t food_type) const;
+	// Fills and returns the reused m_perception scratch buffer. update() writes
+	// the state one-hot indices [27-30] into it after calling this.
+	std::vector<float>& perceive(const Simulation& world);
 
 	// These are the target positions for the RNN inputs, updated each tick.
 	// They are set to zero if no target is available in the current state.

@@ -6,6 +6,7 @@
 #include <mutex>
 
 #include "Agent.h"
+#include "SpatialGrid.h"
 
 // Define food types
 enum FoodType : size_t {
@@ -45,6 +46,18 @@ public:
     std::vector<SoundEvent> m_sound_events; // Holds sound events for the current tick
     const float m_world_size;
     std::mutex m_data_mutex; // Mutex to protect agent/food vectors during access
+
+    // Spatial indices over agents and food, partitioned by type and rebuilt
+    // each tick. Agents query these instead of linearly scanning m_agents /
+    // m_food, and each sensor only visits the grid holding the types it can
+    // actually detect. Cell size matches the largest local sensor radius
+    // (scent/sound = 30 units).
+    SpatialGrid m_feeder_grid;
+    SpatialGrid m_predator_grid;
+    SpatialGrid m_vegetable_grid;
+    SpatialGrid m_meat_grid;
+    static constexpr float SPATIAL_CELL_SIZE = 30.0f;
+    void rebuild_spatial_grids();
 	
     // --- Simulation Parameters ---
 	// Brain structure parameters for new agents

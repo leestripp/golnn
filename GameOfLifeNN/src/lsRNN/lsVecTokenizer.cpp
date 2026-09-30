@@ -16,14 +16,14 @@ void lsVecTokenizer::add_token_onehot(size_t token_id)
 
 	if(m_token_map.find(token_id) == m_token_map.end())
 	{
-		vector<double> v(m_vector_size, 0.0);
-		v[token_id] = 1.0;
+		vector<float> v(m_vector_size, 0.0f);
+		v[token_id] = 1.0f;
 		m_token_map[token_id] = v;
 	}
 }
 
 // Find vector for tokenId.
-const vector<double>& lsVecTokenizer::find_vector(size_t token_id)
+const vector<float>& lsVecTokenizer::find_vector(size_t token_id)
 {
 	auto it = m_token_map.find(token_id);
 	if(it != m_token_map.end())
@@ -34,10 +34,10 @@ const vector<double>& lsVecTokenizer::find_vector(size_t token_id)
 }
 
 // Find the token ID for a given vector
-size_t lsVecTokenizer::find_tokenId(const vector<double>& predicted_vector) const
+size_t lsVecTokenizer::find_tokenId(const vector<float>& predicted_vector) const
 {
 	size_t closest_token_id = 0;
-	double max_val = -1.0;
+	float max_val = -1.0f;
 
 	for(const auto& pair : m_token_map)
 	{
@@ -51,22 +51,23 @@ size_t lsVecTokenizer::find_tokenId(const vector<double>& predicted_vector) cons
 }
 
 // Find a list of N closest token IDs for a given vector
-vector<size_t> lsVecTokenizer::find_n_closest_tokenIds(const vector<double>& predicted_vector, size_t n) const
+vector<size_t> lsVecTokenizer::find_n_closest_tokenIds(const vector<float>& predicted_vector, size_t n) const
 {
 	// A priority queue to keep track of the N closest tokens found so far.
 	// The pair stores {distance, token_id}.
 	// We use greater to make it a min-heap, so the smallest element (largest distance) is at the top.
-	priority_queue<pair<double, size_t>> closest_tokens;
-	
+	priority_queue<pair<float, size_t>> closest_tokens;
+
 	for(const auto& pair : m_token_map)
 	{
 		size_t token_id = pair.first;
-		const vector<double>& token_vector = pair.second;
+		const vector<float>& token_vector = pair.second;
 
-		double distance = 0.0;
+		float distance = 0.0f;
 		for(size_t k = 0; k < predicted_vector.size(); k++)
 		{
-			distance += pow(predicted_vector[k] - token_vector[k], 2);
+			const float diff = predicted_vector[k] - token_vector[k];
+			distance += diff * diff;
 		}
 
 		// If the priority queue has less than N elements, just push the new token.
@@ -81,7 +82,7 @@ vector<size_t> lsVecTokenizer::find_n_closest_tokenIds(const vector<double>& pre
 			closest_tokens.push({distance, token_id});
 		}
 	}
-	
+
 	// Extract the token IDs from the priority queue into a result vector.
 	vector<size_t> result;
 	while(! closest_tokens.empty())
@@ -113,7 +114,7 @@ void lsVecTokenizer::print() const
 
 // debug.
 // Print a vector
-void lsVecTokenizer::print_vector(const vector<double>& v) const
+void lsVecTokenizer::print_vector(const vector<float>& v) const
 {
 	cout << "[";
 	for(size_t i = 0; i < v.size(); ++i)
@@ -132,5 +133,3 @@ void lsVecTokenizer::print_vector(const vector<size_t>& v) const
 	}
 	cout << "]" << endl;
 }
-
-

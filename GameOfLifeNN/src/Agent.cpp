@@ -57,6 +57,9 @@ Agent::Agent(ls3DRNN brain, const glm::mat4& initial_transform, AgentType type, 
 	m_state_brain(STATE_BRAIN_INPUT_DIM, m_state_brain_hidden_dim, NUM_STATES, Task::CLASSIFICATION),
 	m_gradient_accumulation_step(0)
 {
+	// Sized here rather than in the init list: m_perception is declared before
+	// m_state_brain in the header, so member-init order would warn.
+	m_perception.assign(PERCEPTION_VECTOR_SIZE, 0.0f);
 	// Ensure tokenizer is set up
 	initialize_tokenizer();
 	
@@ -108,7 +111,7 @@ void Agent::update(const Simulation& world)
 	m_prev_transform = m_transform;
 	
 	// 2. Perceive the world, build the movement brain input vector, and update internal world model
-	std::vector<float> perception_vector = perceive(world);
+	std::vector<float>& perception_vector = perceive(world);
 	
 	// 3. Determine the "correct" state based on rules (Teacher)
 	update_state_transitions(world);
@@ -124,7 +127,7 @@ void Agent::update(const Simulation& world)
 	perception_vector[30] = (m_state == State::FLEE) ? 1.0f : 0.0f;
 	
 	// 5. Train the movement brain based on the correct state (accumulates gradients)
-	train_brain(world, perception_vector);
+	train_brain(perception_vector);
 	
 	// 6. Get the next action from the movement brain and update transform
 	m_transform = m_brain.process_step(perception_vector, MAX_SPEED);
@@ -159,7 +162,7 @@ constexpr float MAX_SCENT_RADIUS_SQ = 900.0f; // 30 units
 
 // Gathers sensory information, prepares the input vector for the movement RNN,
 // and updates the agent's internal world model (m_food_pos, m_threat_pos, etc.).
-std::vector<float> Agent::perceive(const Simulation& world)
+std::vector<float>& Agent::perceive(const Simulation& world)
 {
 	// Reset internal world model
 	m_food_pos = glm::vec3(0.0f);
@@ -168,7 +171,8 @@ std::vector<float> Agent::perceive(const Simulation& world)
 
 	// The vector now has space for all new sensors. The state will be added in update().
 	// See Agent.h for PERCEPTION_VECTOR_SIZE definition (31)
-	std::vector<float> perception(PERCEPTION_VECTOR_SIZE, 0.0f);
+	std::vector<float>& perception = m_perception;
+	std::fill(perception.begin(), perception.end(), 0.0f);
 
 	glm::vec3 agent_pos = m_transform[3];
 	
@@ -195,67 +199,79 @@ std::vector<float> Agent::perceive(const Simulation& world)
 	bool found_feeder_prey = false;
 	bool found_predator_prey = false;
 
-	// Find closest food (type-specific)
-	FoodType food_target_type = (m_type == AgentType::FEEDER) ? FoodType::VEGETABLE : FoodType::MEAT;
-	for (const auto& food : world.m_food) {
-		if (food.m_food_type != food_target_type) continue;
+	// Find closest food via the target type's own spatial grid: feeders track
+	// vegetables, predators track meat, and each grid holds only that type.
+	const SpatialGrid& target_food_grid =
+		(m_type == AgentType::FEEDER) ? world.m_vegetable_grid : world.m_meat_grid;
+	target_food_grid.visit(agent_pos, detection_radius, [&](size_t i) {
+		const Food& food = world.m_food[i];
 		float dist_sq = glm::distance2(agent_pos, food.position);
 		if (dist_sq < detection_radius_sq && dist_sq < min_food_dist_sq) {
 			min_food_dist_sq = dist_sq;
 			closest_food_pos = food.position;
 			found_food = true;
 		}
-	}
+	});
 
 	// --- SENSOR: Local Agent Density & Visual Agent Tracking ---
+	// Each sensor visits only the grid holding the types it can detect, so a
+	// feeder's threat scan touches the (small) predator grid instead of every
+	// agent in the world.
 	float friendly_agent_count = 0.0f;
 	float hostile_agent_count = 0.0f;
 
-	for (const auto& other : world.m_agents) {
-		if (&other == this) continue;
-		glm::vec3 other_pos = other.m_transform[3];
-		float dist_sq = glm::distance2(agent_pos, other_pos);
-
-		// Density Calculation
-		if (dist_sq < DENSITY_RADIUS_SQ) {
-			if (m_type == AgentType::FEEDER) {
-				if (other.m_type == AgentType::FEEDER) friendly_agent_count++;
-				else if (other.m_type == AgentType::PREDATOR) hostile_agent_count++;
-			} else { // PREDATOR
-				if (other.m_type == AgentType::PREDATOR) hostile_agent_count++;
+	if (m_type == AgentType::FEEDER) {
+		// Threats: closest predator within visual range (also counts local
+		// hostile density — same visit, extra comparison).
+		world.m_predator_grid.visit(agent_pos, detection_radius, [&](size_t i) {
+			const Agent& other = world.m_agents[i];
+			glm::vec3 other_pos = other.m_transform[3];
+			float dist_sq = glm::distance2(agent_pos, other_pos);
+			if (dist_sq < DENSITY_RADIUS_SQ) hostile_agent_count++;
+			if (dist_sq < detection_radius_sq && dist_sq < min_threat_dist_sq) {
+				min_threat_dist_sq = dist_sq;
+				closest_threat_pos = other_pos;
+				found_threat = true;
 			}
-		}
-
-		// Visual Tracking
-		if (m_type == AgentType::FEEDER) {
-			if (other.m_type == AgentType::PREDATOR && dist_sq < detection_radius_sq) {
-				if (dist_sq < min_threat_dist_sq) {
-					min_threat_dist_sq = dist_sq;
-					closest_threat_pos = other_pos;
-					found_threat = true;
-				}
-			} else if (other.m_type == AgentType::FEEDER && dist_sq < min_follow_dist_sq) {
+		});
+		// Friends: closest feeder within follow range (ROAM_FOLLOW_RADIUS_SQ).
+		world.m_feeder_grid.visit(agent_pos, sqrt(ROAM_FOLLOW_RADIUS_SQ), [&](size_t i) {
+			const Agent& other = world.m_agents[i];
+			if (&other == this) return;
+			glm::vec3 other_pos = other.m_transform[3];
+			float dist_sq = glm::distance2(agent_pos, other_pos);
+			if (dist_sq < DENSITY_RADIUS_SQ) friendly_agent_count++;
+			if (dist_sq < min_follow_dist_sq) {
 				min_follow_dist_sq = dist_sq;
 				closest_follow_pos = other_pos;
 				found_follow = true;
 			}
-		} else { // PREDATOR
-			if (dist_sq < detection_radius_sq) {
-				if (other.m_type == AgentType::FEEDER) {
-					if (dist_sq < min_feeder_prey_dist_sq) {
-						min_feeder_prey_dist_sq = dist_sq;
-						closest_feeder_prey_pos = other_pos;
-						found_feeder_prey = true;
-					}
-				} else if (other.m_type == AgentType::PREDATOR) {
-					if (dist_sq < min_predator_prey_dist_sq) {
-						min_predator_prey_dist_sq = dist_sq;
-						closest_predator_prey_pos = other_pos;
-						found_predator_prey = true;
-					}
-				}
+		});
+	} else { // PREDATOR
+		// Prey: closest feeder within visual range.
+		world.m_feeder_grid.visit(agent_pos, detection_radius, [&](size_t i) {
+			const Agent& other = world.m_agents[i];
+			glm::vec3 other_pos = other.m_transform[3];
+			float dist_sq = glm::distance2(agent_pos, other_pos);
+			if (dist_sq < detection_radius_sq && dist_sq < min_feeder_prey_dist_sq) {
+				min_feeder_prey_dist_sq = dist_sq;
+				closest_feeder_prey_pos = other_pos;
+				found_feeder_prey = true;
 			}
-		}
+		});
+		// Rivals: closest other predator within visual range (also hostile density).
+		world.m_predator_grid.visit(agent_pos, detection_radius, [&](size_t i) {
+			const Agent& other = world.m_agents[i];
+			if (&other == this) return;
+			glm::vec3 other_pos = other.m_transform[3];
+			float dist_sq = glm::distance2(agent_pos, other_pos);
+			if (dist_sq < DENSITY_RADIUS_SQ) hostile_agent_count++;
+			if (dist_sq < detection_radius_sq && dist_sq < min_predator_prey_dist_sq) {
+				min_predator_prey_dist_sq = dist_sq;
+				closest_predator_prey_pos = other_pos;
+				found_predator_prey = true;
+			}
+		});
 	}
 	
 	// Predator prey selection logic
@@ -313,9 +329,12 @@ std::vector<float> Agent::perceive(const Simulation& world)
 	glm::vec3 strongest_scent_dir(0.0f);
 	float max_scent_intensity = 0.0f;
 	
+	// Scent radius (30) matches the spatial grid cell size, so this touches
+	// at most one ring of neighbouring cells.
+	const float scent_radius = sqrt(MAX_SCENT_RADIUS_SQ);
 	if (m_type == AgentType::FEEDER) {
-		for (const auto& food : world.m_food) {
-			if (food.m_food_type != FoodType::VEGETABLE) continue;
+		world.m_vegetable_grid.visit(agent_pos, scent_radius, [&](size_t i) {
+			const Food& food = world.m_food[i];
 			float dist_sq = glm::distance2(agent_pos, food.position);
 			if (dist_sq < MAX_SCENT_RADIUS_SQ) {
 				float intensity = 1.0f / (dist_sq + 1.0f);
@@ -324,10 +343,10 @@ std::vector<float> Agent::perceive(const Simulation& world)
 					strongest_scent_dir = food.position - agent_pos;
 				}
 			}
-		}
+		});
 	} else { // PREDATOR
-		for (const auto& food : world.m_food) { // Smell MEAT
-			if (food.m_food_type != FoodType::MEAT) continue;
+		world.m_meat_grid.visit(agent_pos, scent_radius, [&](size_t i) { // Smell MEAT
+			const Food& food = world.m_food[i];
 			float dist_sq = glm::distance2(agent_pos, food.position);
 			if (dist_sq < MAX_SCENT_RADIUS_SQ) {
 				float intensity = 1.0f / (dist_sq + 1.0f);
@@ -336,9 +355,10 @@ std::vector<float> Agent::perceive(const Simulation& world)
 					strongest_scent_dir = food.position - agent_pos;
 				}
 			}
-		}
-		for (const auto& other : world.m_agents) { // Smell FEEDERS
-			if (other.m_type != AgentType::FEEDER) continue;
+		});
+		world.m_feeder_grid.visit(agent_pos, scent_radius, [&](size_t i) { // Smell FEEDERS
+			const Agent& other = world.m_agents[i];
+			if (&other == this) return;
 			float dist_sq = glm::distance2(agent_pos, glm::vec3(other.m_transform[3]));
 			if (dist_sq < MAX_SCENT_RADIUS_SQ) {
 				float intensity = 1.5f / (dist_sq + 1.0f); // Agents are a stronger scent
@@ -347,7 +367,7 @@ std::vector<float> Agent::perceive(const Simulation& world)
 					strongest_scent_dir = glm::vec3(other.m_transform[3]) - agent_pos;
 				}
 			}
-		}
+		});
 	}
 
 	if (max_scent_intensity > 0.0f) {
@@ -460,40 +480,8 @@ void Agent::update_state_transitions(const Simulation& /* world */)
 	m_state = next_state;
 }
 
-// New sensor function to find the direction to the closest food of a specific type.
-glm::vec3 Agent::find_closest_food_direction(const Simulation& world, size_t food_type) const
-{
-	glm::vec3 agent_pos = m_transform[3];
-	glm::vec3 closest_food_pos(0.0f);
-	float min_dist_sq = std::numeric_limits<float>::max();
-	bool found_food = false;
-
-	const float detection_radius = world.m_world_size * 0.5f;
-	const float detection_radius_sq = detection_radius * detection_radius;
-
-	for (const auto& food : world.m_food) {
-		if (food.m_food_type == food_type) {
-			float dist_sq = glm::distance2(agent_pos, food.position);
-			if (dist_sq < detection_radius_sq && dist_sq < min_dist_sq) {
-				min_dist_sq = dist_sq;
-				closest_food_pos = food.position;
-				found_food = true;
-			}
-		}
-	}
-
-	if (found_food) {
-		glm::vec3 direction = closest_food_pos - agent_pos;
-		if (glm::length2(direction) > 1e-6f) {
-			return glm::normalize(direction);
-		}
-	}
-
-	return glm::vec3(0.0f); // Return zero vector if no food is found
-}
-
 // Teacher-forcing for the movement brain using the new directional sensor approach.
-void Agent::train_brain(const Simulation& world, const std::vector<float>& perception_vector)
+void Agent::train_brain(const std::vector<float>& perception_vector)
 {
 	glm::vec3 primary_direction(0.0f);
 	bool has_target = false;
@@ -503,16 +491,20 @@ void Agent::train_brain(const Simulation& world, const std::vector<float>& perce
 	// Step 1: Determine the ideal PRIMARY direction based on state (the main goal).
 	switch (m_state) {
 		case State::HUNT:
-			if (m_type == AgentType::FEEDER) {
-				primary_direction = find_closest_food_direction(world, FoodType::VEGETABLE);
-			} else { // PREDATOR
-				if (m_threat_pos != glm::vec3(0.0f)) {
-					glm::vec3 dir_to_threat = m_threat_pos - agent_pos;
-					if (glm::length2(dir_to_threat) > 1e-6f) {
-						primary_direction = glm::normalize(dir_to_threat);
+			// m_food_pos already holds the closest target-type food (vegetable
+			// for feeders, meat for predators) found by perceive() this tick —
+			// reuse it instead of re-scanning the food grid.
+			if (m_type == AgentType::FEEDER || m_threat_pos == glm::vec3(0.0f)) {
+				if (m_food_pos != glm::vec3(0.0f)) {
+					glm::vec3 dir_to_food = m_food_pos - agent_pos;
+					if (glm::length2(dir_to_food) > 1e-6f) {
+						primary_direction = glm::normalize(dir_to_food);
 					}
-				} else {
-					primary_direction = find_closest_food_direction(world, FoodType::MEAT);
+				}
+			} else { // PREDATOR chasing prey
+				glm::vec3 dir_to_threat = m_threat_pos - agent_pos;
+				if (glm::length2(dir_to_threat) > 1e-6f) {
+					primary_direction = glm::normalize(dir_to_threat);
 				}
 			}
 			has_target = (primary_direction != glm::vec3(0.0f));
@@ -608,59 +600,45 @@ void Agent::train_brain(const Simulation& world, const std::vector<float>& perce
 // New function to train the state-selection RNN
 void Agent::train_state_brain(const Simulation& world)
 {
-	// 1. Create input vector for the state brain.
-	std::vector<double> state_brain_input_vec;
-	state_brain_input_vec.reserve(STATE_BRAIN_INPUT_DIM);
+	// 1. Create the input vector for the state brain directly in the reused
+	//    scratch buffer (three one-hot bin blocks, no per-tick allocations).
+	std::vector<float>& input = m_state_input_scratch;
+	input.assign(STATE_BRAIN_INPUT_DIM, 0.0f);
+
+	// Use the dynamic detection radius for the binning
+	const float max_detection_radius = world.m_world_size * 0.5f;
 
 	// --- Part A: Energy Input (One-hot encoded bin) ---
-	std::vector<double> energy_input_vec(NUM_ENERGY_BINS, 0.0);
-	float max_energy = (m_type == AgentType::PREDATOR) ? PREDATOR_ENERGY_TO_REPRODUCE : FEEDER_ENERGY_TO_REPRODUCE;
-	float energy_ratio = std::clamp(m_energy / max_energy, 0.0f, 1.0f);
-	// Ensure the bin index is within bounds [0, NUM_ENERGY_BINS - 1]
-	int energy_bin_index = static_cast<int>(energy_ratio * (NUM_ENERGY_BINS - 0.0001f));
-	energy_input_vec[energy_bin_index] = 1.0;
-	state_brain_input_vec.insert(state_brain_input_vec.end(), energy_input_vec.begin(), energy_input_vec.end());
+	const float max_energy = (m_type == AgentType::PREDATOR) ? PREDATOR_ENERGY_TO_REPRODUCE : FEEDER_ENERGY_TO_REPRODUCE;
+	const float energy_ratio = std::clamp(m_energy / max_energy, 0.0f, 1.0f);
+	const int energy_bin_index = static_cast<int>(energy_ratio * (NUM_ENERGY_BINS - 0.0001f));
+	input[energy_bin_index] = 1.0f;
 
 	// --- Part B: Distance to Enemy Input (One-hot encoded bin) ---
-	std::vector<double> distance_input_vec(NUM_DISTANCE_BINS, 0.0);
 	float distance_to_threat = std::numeric_limits<float>::max();
-
 	if (m_threat_pos != glm::vec3(0.0f)) {
 		distance_to_threat = glm::distance(glm::vec3(m_transform[3]), m_threat_pos);
 	}
-
-	// Use the dynamic detection radius for the binning
-	float max_detection_radius = world.m_world_size * 0.5f;
-	
-	float distance_ratio = std::clamp(distance_to_threat / max_detection_radius, 0.0f, 1.0f);
-	int distance_bin_index = static_cast<int>(distance_ratio * (NUM_DISTANCE_BINS - 0.0001f));
-	distance_input_vec[distance_bin_index] = 1.0;
-	state_brain_input_vec.insert(state_brain_input_vec.end(), distance_input_vec.begin(), distance_input_vec.end());
+	const float distance_ratio = std::clamp(distance_to_threat / max_detection_radius, 0.0f, 1.0f);
+	const int distance_bin_index = NUM_ENERGY_BINS + static_cast<int>(distance_ratio * (NUM_DISTANCE_BINS - 0.0001f));
+	input[distance_bin_index] = 1.0f;
 
 	// --- Part C: Distance to Food Input (One-hot encoded bin) ---
-	std::vector<double> food_distance_input_vec(NUM_FOOD_DISTANCE_BINS, 0.0);
 	float distance_to_food = std::numeric_limits<float>::max();
-
 	if (m_food_pos != glm::vec3(0.0f)) {
 		distance_to_food = glm::distance(glm::vec3(m_transform[3]), m_food_pos);
 	}
-	
-	float food_distance_ratio = std::clamp(distance_to_food / max_detection_radius, 0.0f, 1.0f);
-	int food_distance_bin_index = static_cast<int>(food_distance_ratio * (NUM_FOOD_DISTANCE_BINS - 0.0001f));
-	food_distance_input_vec[food_distance_bin_index] = 1.0;
-	state_brain_input_vec.insert(state_brain_input_vec.end(), food_distance_input_vec.begin(), food_distance_input_vec.end());
+	const float food_distance_ratio = std::clamp(distance_to_food / max_detection_radius, 0.0f, 1.0f);
+	const int food_bin_index = NUM_ENERGY_BINS + NUM_DISTANCE_BINS
+		+ static_cast<int>(food_distance_ratio * (NUM_FOOD_DISTANCE_BINS - 0.0001f));
+	input[food_bin_index] = 1.0f;
 
-	// 2. Get the one-hot target vector for the current "correct" state.
-	size_t target_state_id = static_cast<size_t>(m_state);
+	// 2. One-hot target vector for the current "correct" state (teacher).
+	const size_t target_state_id = static_cast<size_t>(m_state);
 	const auto& target_state_vec = state_tokenizer.find_vector(target_state_id);
 
-	// 3. Perform a training step.
-	m_state_brain.reset_state();
-	std::vector<std::vector<double>> inputs_sequence = { state_brain_input_vec };
-	std::vector<double> predicted_output = m_state_brain.forward_pass(state_brain_input_vec);
-	std::vector<std::vector<double>> outputs_sequence = { predicted_output };
-	std::vector<std::vector<double>> expected_sequence = { target_state_vec };
-	m_state_brain.backpropagate(inputs_sequence, outputs_sequence, expected_sequence);
+	// 3. Single-step training (resets state, forward, length-1 BPTT).
+	m_state_brain.train_step(input, target_state_vec);
 }
 
 float Agent::get_learning_rate() const

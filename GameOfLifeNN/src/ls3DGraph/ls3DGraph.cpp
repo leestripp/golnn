@@ -182,9 +182,43 @@ void ls3DGraph::on_realize()
 {
 	Gtk::GLArea::on_realize();
 	make_current();
-	if(glewInit() != GLEW_OK)
+	// GTK4 requests a core-profile GL context; GLEW only handles core profiles
+	// when experimental mode is enabled first.
+	if(const GError* area_err = gtk_gl_area_get_error(GTK_GL_AREA(gobj())))
 	{
-		cerr << "Failed to initialize GLEW" << endl; return;
+		cerr << "GLArea context error: " << area_err->message << endl; return;
+	}
+	if(const GLubyte* ver = glGetString(GL_VERSION))
+	{
+		cerr << "GL_VERSION: " << reinterpret_cast<const char*>(ver)
+		     << " | renderer: " << reinterpret_cast<const char*>(glGetString(GL_RENDERER)) << endl;
+	}
+	else
+	{
+		cerr << "GL_VERSION: NULL (no current context after make_current)" << endl;
+	}
+	glewExperimental = GL_TRUE;
+	const GLenum glew_err = glewInit();
+	cerr << "glewInit returned code " << static_cast<unsigned>(glew_err)
+	     << " (" << reinterpret_cast<const char*>(glewGetErrorString(glew_err)) << ")" << endl;
+	// On Wayland, GTK4 hands us an EGL context while GLEW's GLX probe fails
+	// with GLEW_ERROR_NO_GLX_DISPLAY (4). GLEW loads all *core* GL function
+	// pointers before that probe, so the error is harmless if the pointers
+	// we actually use are non-null. Treat it as fatal only when a core
+	// entry point is missing.
+	if(glew_err != GLEW_OK && glew_err != GLEW_ERROR_NO_GLX_DISPLAY)
+	{
+		cerr << "Failed to initialize GLEW: " << glewGetErrorString(glew_err) << endl; return;
+	}
+	// Debug: prove the core entry points survived the failed GLX probe.
+	cerr << "GL entry points:"
+	     << " glCreateShader=" << (glCreateShader ? "ok" : "NULL")
+	     << " glGenVertexArrays=" << (glGenVertexArrays ? "ok" : "NULL")
+	     << " glBufferData=" << (glBufferData ? "ok" : "NULL")
+	     << " glUseProgram=" << (glUseProgram ? "ok" : "NULL") << endl;
+	if(!glCreateShader || !glGenVertexArrays || !glBufferData || !glUseProgram)
+	{
+		cerr << "Core GL function pointers missing - cannot render." << endl; return;
 	}
 	glEnable(GL_DEPTH_TEST);
 	glPointSize(5.0f);
