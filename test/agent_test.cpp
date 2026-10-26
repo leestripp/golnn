@@ -63,6 +63,47 @@ TEST_CASE(initial_energy_defaults_by_type)
 	CHECK_NEAR(predator.m_energy, 150.0f, 1e-4f); // 1.5x the feeder baseline
 }
 
+TEST_CASE(catalog_tiers_are_used_and_inherited)
+{
+	SimulationConfig config;
+	config.seed = 44;
+	config.worker_count = 1;
+	config.brain_tier = BrainTier::MEDIUM;
+	Simulation sim(1, 0, 100.0f, config);
+	Agent& parent = sim.m_agents.front();
+	CHECK(parent.brain_tier() == BrainTier::MEDIUM);
+	CHECK(parent.m_brain.get_hidden_layer_dims() == movement_hidden_dims(BrainTier::MEDIUM));
+	CHECK(parent.get_state_brain_hidden_dim() == state_hidden_dim(BrainTier::MEDIUM));
+	parent.m_energy = 200.0f;
+	Agent child = parent.reproduce();
+	CHECK(child.brain_tier() == BrainTier::MEDIUM);
+	CHECK(child.m_brain.get_hidden_layer_dims() == movement_hidden_dims(BrainTier::MEDIUM));
+	CHECK(child.get_state_brain_hidden_dim() == state_hidden_dim(BrainTier::MEDIUM));
+}
+
+TEST_CASE(runtime_tier_selection_creates_mixed_population)
+{
+	SimulationConfig config;
+	config.seed = 45;
+	config.worker_count = 1;
+	config.brain_tier = BrainTier::SMALL;
+	config.predator_spawn_probability = 0.0f;
+	Simulation sim(1, 0, 100.0f, config);
+	sim.set_brain_tier(BrainTier::MEDIUM);
+	sim.spawn_new_agents(1);
+	sim.set_brain_tier(BrainTier::LARGE);
+	sim.spawn_new_agents(1);
+	CHECK(sim.m_agents.size() == 3);
+	CHECK(sim.m_agents[0].brain_tier() == BrainTier::SMALL);
+	CHECK(sim.m_agents[1].brain_tier() == BrainTier::MEDIUM);
+	CHECK(sim.m_agents[2].brain_tier() == BrainTier::LARGE);
+	sim.tick();
+	const EcologyStats stats = sim.ecology_stats();
+	CHECK(stats.brain_tier_counts[static_cast<std::size_t>(BrainTier::SMALL)] == 1);
+	CHECK(stats.brain_tier_counts[static_cast<std::size_t>(BrainTier::MEDIUM)] == 1);
+	CHECK(stats.brain_tier_counts[static_cast<std::size_t>(BrainTier::LARGE)] == 1);
+}
+
 TEST_CASE(reproduce_halves_energy_and_preserves_type_and_structure)
 {
 	Agent parent = make_agent(Agent::AgentType::FEEDER, glm::vec3(0.0f), 200.0f);
@@ -76,7 +117,7 @@ TEST_CASE(reproduce_halves_energy_and_preserves_type_and_structure)
 	CHECK(child.m_age == 0);
 	// The child's movement brain is a (mutated) copy of the parent's, so
 	// its architecture must match even though the weights differ.
-	CHECK(child.get_hidden_layer_dims() == parent_dims);
+	CHECK(child.m_brain.get_hidden_layer_dims() == parent_dims);
 }
 
 TEST_CASE(reproduce_places_child_near_parent)

@@ -13,34 +13,33 @@
 #include <limits>
 #include <random>
 
-// Random number generator for agent-specific properties like learning rate
-static std::random_device rd;
-static std::mt19937 agent_gen(rd());
-static std::uniform_real_distribution<float> lr_dist(0.0001f, 0.1f);
-static std::uniform_real_distribution<float> mutation_chance_dist(0.0f, 1.0f);
-static std::uniform_int_distribution<size_t> state_neuron_dist(Agent::MIN_STATE_NEURONS, Agent::MAX_STATE_NEURONS);
-// Distribution for spawning offset to prevent clumping
-static std::uniform_real_distribution<float> offset_dist(-1.0f, 1.0f);
-
-// Static tokenizer for agent states.
-static lsVecTokenizer state_tokenizer(Agent::NUM_STATES);
-static bool tokenizer_initialized = false;
-
-static void initialize_tokenizer()
+namespace
 {
-	if(! tokenizer_initialized)
+	size_t random_state_neuron_count(std::mt19937& rng)
 	{
-		state_tokenizer.add_token_onehot(static_cast<size_t>(Agent::State::IDLE));
-		state_tokenizer.add_token_onehot(static_cast<size_t>(Agent::State::ROAM));
-		state_tokenizer.add_token_onehot(static_cast<size_t>(Agent::State::HUNT));
-		state_tokenizer.add_token_onehot(static_cast<size_t>(Agent::State::FLEE));
-		tokenizer_initialized = true;
+		std::uniform_int_distribution<size_t> dist(Agent::MIN_STATE_NEURONS, Agent::MAX_STATE_NEURONS);
+		return dist(rng);
+	}
+
+	const lsVecTokenizer& state_tokenizer()
+	{
+		// Function-local static initialization is thread-safe and has no shared
+		// mutable initialization flag.
+		static const lsVecTokenizer tokenizer = [] {
+			lsVecTokenizer result(Agent::NUM_STATES);
+			result.add_token_onehot(static_cast<size_t>(Agent::State::IDLE));
+			result.add_token_onehot(static_cast<size_t>(Agent::State::ROAM));
+			result.add_token_onehot(static_cast<size_t>(Agent::State::HUNT));
+			result.add_token_onehot(static_cast<size_t>(Agent::State::FLEE));
+			return result;
+		}();
+		return tokenizer;
 	}
 }
 
 
 // Agent constructor
-Agent::Agent(ls3DRNN brain, const glm::mat4& initial_transform, AgentType type, float learning_rate, float initial_energy, size_t state_hidden_dim) :
+Agent::Agent(ls3DRNN brain, const glm::mat4& initial_transform, AgentType type, float learning_rate, float initial_energy, size_t state_hidden_dim, std::uint32_t random_seed, BrainTier brain_tier) :
 	m_brain(std::move(brain)),
 	m_transform(initial_transform),
 	m_prev_transform(initial_transform),
@@ -52,21 +51,22 @@ Agent::Agent(ls3DRNN brain, const glm::mat4& initial_transform, AgentType type, 
 	m_food_pos(0.0f),
 	m_follow_agent_pos(0.0f),
 	m_threat_pos(0.0f),
+	m_brain_tier(brain_tier),
 	m_energy_decay_rate(FEEDER_ENERGY_DECAY),
-	m_state_brain_hidden_dim(state_hidden_dim == 0 ? state_neuron_dist(agent_gen) : state_hidden_dim),
-	m_state_brain(STATE_BRAIN_INPUT_DIM, m_state_brain_hidden_dim, NUM_STATES, Task::CLASSIFICATION),
+	m_rng(random_seed),
+	m_state_brain_hidden_dim(state_hidden_dim == 0 ? random_state_neuron_count(m_rng) : state_hidden_dim),
+	m_state_brain(STATE_BRAIN_INPUT_DIM, m_state_brain_hidden_dim, NUM_STATES, Task::CLASSIFICATION, m_rng()),
 	m_gradient_accumulation_step(0)
 {
 	// Sized here rather than in the init list: m_perception is declared before
 	// m_state_brain in the header, so member-init order would warn.
 	m_perception.assign(PERCEPTION_VECTOR_SIZE, 0.0f);
-	// Ensure tokenizer is set up
-	initialize_tokenizer();
-	
+	m_movement_target.assign(7, 0.0f);
 	// Assign learning rate: random if not provided, otherwise use the given value.
 	if(learning_rate < 0.0f)
 	{
-		m_learning_rate = lr_dist(agent_gen);
+		std::uniform_real_distribution<float> lr_dist(0.0001f, 0.1f);
+		m_learning_rate = lr_dist(m_rng);
 	} else
 	{
 		m_learning_rate = learning_rate;
@@ -100,39 +100,47 @@ Agent::Agent(ls3DRNN brain, const glm::mat4& initial_transform, AgentType type, 
 	}
 }
 
-// Main update loop for the agent
+// Convenience scalar update used by tests and custom brains. Simulation splits
+// these phases so standardized movement brains can be trained as a batch.
 void Agent::update(const Simulation& world)
 {
-	// 1. Basic housekeeping: age and decay energy
+	if(!prepare_update(world)) return;
+	train_movement();
+	finish_update(world);
+}
+
+bool Agent::prepare_update(const Simulation& world)
+{
+	m_movement_pending = false;
 	m_age++;
 	m_energy -= m_energy_decay_rate;
-	if(isDead()) return;
-	
+	if(isDead()) return false;
+
 	m_prev_transform = m_transform;
-	
-	// 2. Perceive the world, build the movement brain input vector, and update internal world model
 	std::vector<float>& perception_vector = perceive(world);
-	
-	// 3. Determine the "correct" state based on rules (Teacher)
 	update_state_transitions(world);
-	
-	// 4. Train the state-selection brain (accumulates gradients)
 	train_state_brain(world);
-	
-	// Add current state to the perception vector for the movement brain
-	// The perception vector is size 31. Indices 27, 28, 29, 30 are for state.
+
 	perception_vector[27] = (m_state == State::IDLE) ? 1.0f : 0.0f;
 	perception_vector[28] = (m_state == State::ROAM) ? 1.0f : 0.0f;
 	perception_vector[29] = (m_state == State::HUNT) ? 1.0f : 0.0f;
 	perception_vector[30] = (m_state == State::FLEE) ? 1.0f : 0.0f;
-	
-	// 5. Train the movement brain based on the correct state (accumulates gradients)
-	train_brain(perception_vector);
-	
-	// 6. Get the next action from the movement brain and update transform
-	m_transform = m_brain.process_step(perception_vector, MAX_SPEED);
-	
-	// 7. Apply gradients after accumulating for BATCH_SIZE steps
+	prepare_brain_target(perception_vector);
+	m_movement_pending = true;
+	return true;
+}
+
+void Agent::train_movement()
+{
+	if(m_movement_pending)
+		m_brain.train_step(m_perception, m_movement_target, ROTATION_WEIGHT);
+}
+
+void Agent::finish_update(const Simulation& world)
+{
+	if(!m_movement_pending) return;
+	m_transform = m_brain.process_step(m_perception, MAX_SPEED);
+
 	m_gradient_accumulation_step++;
 	if(m_gradient_accumulation_step >= BATCH_SIZE)
 	{
@@ -140,20 +148,19 @@ void Agent::update(const Simulation& world)
 		m_state_brain.apply_and_clear_gradients(m_learning_rate, BATCH_SIZE);
 		m_gradient_accumulation_step = 0;
 	}
-	
-	// 8. Enforce world boundaries
+
 	glm::vec3 current_pos = m_transform[3];
-	float half_world_size = world.m_world_size / 2.0f;
+	const float half_world_size = world.m_world_size / 2.0f;
 	current_pos.x = std::clamp(current_pos.x, -half_world_size, half_world_size);
 	current_pos.y = std::clamp(current_pos.y, -half_world_size, half_world_size);
 	current_pos.z = std::clamp(current_pos.z, -half_world_size, half_world_size);
 	m_transform[3] = glm::vec4(current_pos, 1.0f);
-	m_brain.set_state(m_transform); // Keep brain state in sync after clamping
-	
-	// 9. Update color based on energy
-	float max_energy = (m_type == AgentType::PREDATOR) ? PREDATOR_ENERGY_TO_REPRODUCE : FEEDER_ENERGY_TO_REPRODUCE;
-	float energy_factor = std::clamp(m_energy / max_energy, 0.1f, 1.0f); // Clamp to avoid being invisible
+	m_brain.set_state(m_transform);
+
+	const float max_energy = (m_type == AgentType::PREDATOR) ? PREDATOR_ENERGY_TO_REPRODUCE : FEEDER_ENERGY_TO_REPRODUCE;
+	const float energy_factor = std::clamp(m_energy / max_energy, 0.1f, 1.0f);
 	m_color = m_base_color * energy_factor;
+	m_movement_pending = false;
 }
 
 // New constants for sensors
@@ -224,8 +231,7 @@ std::vector<float>& Agent::perceive(const Simulation& world)
 		// Threats: closest predator within visual range (also counts local
 		// hostile density — same visit, extra comparison).
 		world.m_predator_grid.visit(agent_pos, detection_radius, [&](size_t i) {
-			const Agent& other = world.m_agents[i];
-			glm::vec3 other_pos = other.m_transform[3];
+			glm::vec3 other_pos = world.sensed_agent_transform(i)[3];
 			float dist_sq = glm::distance2(agent_pos, other_pos);
 			if (dist_sq < DENSITY_RADIUS_SQ) hostile_agent_count++;
 			if (dist_sq < detection_radius_sq && dist_sq < min_threat_dist_sq) {
@@ -238,7 +244,7 @@ std::vector<float>& Agent::perceive(const Simulation& world)
 		world.m_feeder_grid.visit(agent_pos, sqrt(ROAM_FOLLOW_RADIUS_SQ), [&](size_t i) {
 			const Agent& other = world.m_agents[i];
 			if (&other == this) return;
-			glm::vec3 other_pos = other.m_transform[3];
+			glm::vec3 other_pos = world.sensed_agent_transform(i)[3];
 			float dist_sq = glm::distance2(agent_pos, other_pos);
 			if (dist_sq < DENSITY_RADIUS_SQ) friendly_agent_count++;
 			if (dist_sq < min_follow_dist_sq) {
@@ -250,8 +256,7 @@ std::vector<float>& Agent::perceive(const Simulation& world)
 	} else { // PREDATOR
 		// Prey: closest feeder within visual range.
 		world.m_feeder_grid.visit(agent_pos, detection_radius, [&](size_t i) {
-			const Agent& other = world.m_agents[i];
-			glm::vec3 other_pos = other.m_transform[3];
+			glm::vec3 other_pos = world.sensed_agent_transform(i)[3];
 			float dist_sq = glm::distance2(agent_pos, other_pos);
 			if (dist_sq < detection_radius_sq && dist_sq < min_feeder_prey_dist_sq) {
 				min_feeder_prey_dist_sq = dist_sq;
@@ -263,7 +268,7 @@ std::vector<float>& Agent::perceive(const Simulation& world)
 		world.m_predator_grid.visit(agent_pos, detection_radius, [&](size_t i) {
 			const Agent& other = world.m_agents[i];
 			if (&other == this) return;
-			glm::vec3 other_pos = other.m_transform[3];
+			glm::vec3 other_pos = world.sensed_agent_transform(i)[3];
 			float dist_sq = glm::distance2(agent_pos, other_pos);
 			if (dist_sq < DENSITY_RADIUS_SQ) hostile_agent_count++;
 			if (dist_sq < detection_radius_sq && dist_sq < min_predator_prey_dist_sq) {
@@ -359,12 +364,12 @@ std::vector<float>& Agent::perceive(const Simulation& world)
 		world.m_feeder_grid.visit(agent_pos, scent_radius, [&](size_t i) { // Smell FEEDERS
 			const Agent& other = world.m_agents[i];
 			if (&other == this) return;
-			float dist_sq = glm::distance2(agent_pos, glm::vec3(other.m_transform[3]));
+			float dist_sq = glm::distance2(agent_pos, glm::vec3(world.sensed_agent_transform(i)[3]));
 			if (dist_sq < MAX_SCENT_RADIUS_SQ) {
 				float intensity = 1.5f / (dist_sq + 1.0f); // Agents are a stronger scent
 				if (intensity > max_scent_intensity) {
 					max_scent_intensity = intensity;
-					strongest_scent_dir = glm::vec3(other.m_transform[3]) - agent_pos;
+					strongest_scent_dir = glm::vec3(world.sensed_agent_transform(i)[3]) - agent_pos;
 				}
 			}
 		});
@@ -481,7 +486,7 @@ void Agent::update_state_transitions(const Simulation& /* world */)
 }
 
 // Teacher-forcing for the movement brain using the new directional sensor approach.
-void Agent::train_brain(const std::vector<float>& perception_vector)
+void Agent::prepare_brain_target(const std::vector<float>& perception_vector)
 {
 	glm::vec3 primary_direction(0.0f);
 	bool has_target = false;
@@ -593,8 +598,7 @@ void Agent::train_brain(const std::vector<float>& perception_vector)
 	target_params[5] = desired_rotation.z;
 	target_params[6] = desired_rotation.w;
 
-	// --- Train the Brain ---
-	m_brain.train_step(perception_vector, target_params, ROTATION_WEIGHT);
+	m_movement_target = std::move(target_params);
 }
 
 // New function to train the state-selection RNN
@@ -635,7 +639,7 @@ void Agent::train_state_brain(const Simulation& world)
 
 	// 2. One-hot target vector for the current "correct" state (teacher).
 	const size_t target_state_id = static_cast<size_t>(m_state);
-	const auto& target_state_vec = state_tokenizer.find_vector(target_state_id);
+	const auto& target_state_vec = state_tokenizer().find_vector(target_state_id);
 
 	// 3. Single-step training (resets state, forward, length-1 BPTT).
 	m_state_brain.train_step(input, target_state_vec);
@@ -673,20 +677,44 @@ Agent Agent::reproduce() {
 	ls3DRNN child_brain = m_brain;
 
 	// Mutate the child's brain
-	child_brain.mutate(MUTATION_RATE, MUTATION_AMOUNT);
+	child_brain.mutate(MUTATION_RATE, MUTATION_AMOUNT, m_rng);
 
 	// Child spawns near parent's location with a small random offset to prevent clumping
 	glm::mat4 child_transform = m_transform;
-    glm::vec3 offset(offset_dist(agent_gen), offset_dist(agent_gen), offset_dist(agent_gen));
+    std::uniform_real_distribution<float> offset_dist(-1.0f, 1.0f);
+    glm::vec3 offset(offset_dist(m_rng), offset_dist(m_rng), offset_dist(m_rng));
     child_transform = glm::translate(child_transform, offset * 2.0f); // Offset by up to 2 units
 
 	// Create the new agent. Learning rate is randomized by passing -1.
 	// The child's state brain is also randomized.
-	Agent child(std::move(child_brain), child_transform, m_type, -1.0f, child_energy);
+	Agent child(std::move(child_brain), child_transform, m_type, -1.0f, child_energy,
+		state_hidden_dim(m_brain_tier), m_rng(), m_brain_tier);
 	
 	// Mutate the state brain as well
 	// NOTE: lsRNN does not have a mutate function, so the child gets a new random one.
 	// This is a valid evolutionary strategy.
 	
 	return child;
+}
+
+state_checksum::type Agent::checksum() const
+{
+	auto hash = state_checksum::initial;
+	state_checksum::add(hash, m_brain.checksum());
+	state_checksum::add(hash, m_state_brain.checksum());
+	for(const glm::mat4* transform : {&m_transform, &m_prev_transform})
+	{
+		for(int column = 0; column < 4; ++column)
+			for(int row = 0; row < 4; ++row)
+				state_checksum::add(hash, (*transform)[column][row]);
+	}
+	for(const float value : {m_energy, m_energy_decay_rate, m_learning_rate})
+		state_checksum::add(hash, value);
+	state_checksum::add(hash, static_cast<std::uint64_t>(m_age));
+	state_checksum::add(hash, static_cast<std::uint64_t>(m_state));
+	state_checksum::add(hash, static_cast<std::uint64_t>(m_type));
+	state_checksum::add(hash, static_cast<std::uint64_t>(m_brain_tier));
+	state_checksum::add(hash, m_state_brain_hidden_dim);
+	state_checksum::add(hash, m_gradient_accumulation_step);
+	return hash;
 }

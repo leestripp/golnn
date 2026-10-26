@@ -23,7 +23,7 @@ void lsVecTokenizer::add_token_onehot(size_t token_id)
 }
 
 // Find vector for tokenId.
-const vector<float>& lsVecTokenizer::find_vector(size_t token_id)
+const vector<float>& lsVecTokenizer::find_vector(size_t token_id) const
 {
 	auto it = m_token_map.find(token_id);
 	if(it != m_token_map.end())

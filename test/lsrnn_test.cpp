@@ -91,4 +91,19 @@ TEST_CASE(regression_train_step_reduces_mse)
 	CHECK(after < initial);
 }
 
+TEST_CASE(history_ring_supports_latest_step_after_wraparound)
+{
+	lsRNN rnn(3, 5, 2, Task::REGRESSION, 123);
+	const vector<float> input = {0.25f, -0.5f, 1.0f};
+	const vector<float> target = {0.8f, -0.3f};
+	for(int i = 0; i < 1100; ++i) rnn.forward_pass(input);
+
+	const vector<float> output = rnn.forward_pass(input);
+	// backpropagate reads only the requested trailing sequence, even though
+	// older states have been overwritten by the bounded ring.
+	rnn.backpropagate({input}, {output}, {target});
+	rnn.apply_and_clear_gradients(0.001f, 1);
+	for(const float value : rnn.forward_pass(input)) CHECK(std::isfinite(value));
+}
+
 TEST_MAIN

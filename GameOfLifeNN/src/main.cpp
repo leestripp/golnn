@@ -57,6 +57,7 @@ private:
     // UI Widgets
     Gtk::Box m_main_box;
     Gtk::Label m_info_label;
+    Gtk::Label m_stats_label;
     ls3DGraph m_graph;
 	
     Simulation m_simulation;
@@ -104,6 +105,7 @@ void Game::on_startup()
     // 4. Add the GLArea and the Label to the box container.
     m_main_box.append(m_graph);
     m_main_box.append(m_info_label);
+    m_main_box.append(m_stats_label);
 	
     // 5. Set the box as the main window's child, replacing the old direct connection.
     m_window.set_child(m_main_box);
@@ -186,7 +188,10 @@ bool Game::on_key_pressed(guint keyval, guint, Gdk::ModifierType)
         case GDK_KEY_Shift_R:
             m_key_shift = true;
             break;
-        // NEW: Press 'e' to spawn 20 new agents
+        case GDK_KEY_1: m_simulation.set_brain_tier(BrainTier::SMALL); break;
+        case GDK_KEY_2: m_simulation.set_brain_tier(BrainTier::MEDIUM); break;
+        case GDK_KEY_3: m_simulation.set_brain_tier(BrainTier::LARGE); break;
+        // Press 'e' to spawn 20 new agents with the selected brain tier
         case GDK_KEY_e: case GDK_KEY_E:
             m_simulation.spawn_new_agents(20);
 			break;
@@ -269,6 +274,21 @@ bool Game::on_timer_tick()
         });
     }
 	
+    const EcologyStats stats = m_simulation.ecology_stats();
+    m_stats_label.set_text(
+        "Tick " + std::to_string(stats.tick) +
+        " | Feeders " + std::to_string(stats.feeders) +
+        " | Predators " + std::to_string(stats.predators) +
+        " | Vegetation " + std::to_string(stats.vegetables) +
+        " | Meat " + std::to_string(stats.meat) +
+        " | Births " + std::to_string(stats.total_births) +
+        " | Deaths " + std::to_string(stats.total_deaths) +
+        " | Workers " + std::to_string(m_simulation.worker_count()) +
+        " | Next brain " + std::string(brain_tier_name(m_simulation.get_config().brain_tier)) +
+        " [S " + std::to_string(stats.brain_tier_counts[static_cast<std::size_t>(BrainTier::SMALL)]) +
+        " M " + std::to_string(stats.brain_tier_counts[static_cast<std::size_t>(BrainTier::MEDIUM)]) +
+        " L " + std::to_string(stats.brain_tier_counts[static_cast<std::size_t>(BrainTier::LARGE)]) + "]");
+
     // Now we can use the new ls3DGraph methods to render both data sets.
     m_graph.set_agents_data(agent_render_data);
     m_graph.set_food_data(food_render_data);

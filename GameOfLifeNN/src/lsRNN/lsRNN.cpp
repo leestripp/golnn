@@ -44,25 +44,6 @@ float lsRNN::denormalize_value(float normalized_val, float min_val, float max_va
 	return normalized_val * range + min_val;
 }
 
-// definitions
-float lsRNN::random_float(float min, float max)
-{
-	static random_device rd;
-	static mt19937 gen(rd());
-	uniform_real_distribution<float> dis(min, max);
-	return dis(gen);
-}
-
-vector<float> lsRNN::create_random_vector(size_t size)
-{
-	vector<float> vec(size);
-	for(size_t i = 0; i < size; ++i)
-	{
-		vec[i] = random_float(-1.0f, 1.0f);
-	}
-	return vec;
-}
-
 void lsRNN::softmax(vector<float>& vec)
 {
 	float max_val = -numeric_limits<float>::infinity();
@@ -107,7 +88,7 @@ void lsRNN::normalize(vector<float>& vec)
 
 
 // lsRNN Constructor
-lsRNN::lsRNN(size_t in_dim, size_t hid_dim, size_t out_dim, Task task) :
+lsRNN::lsRNN(size_t in_dim, size_t hid_dim, size_t out_dim, Task task, std::uint32_t random_seed) :
 	input_dim(in_dim),
 	hidden_dim(hid_dim),
 	output_dim(out_dim),
@@ -137,12 +118,16 @@ lsRNN::lsRNN(size_t in_dim, size_t hid_dim, size_t out_dim, Task task) :
 	m_db_h_acc(hid_dim, 0.0f),
 	m_db_o_acc(out_dim, 0.0f)
 {
-	for (float& val : W_xh) val = random_float(-0.5f, 0.5f);
-	for (float& val : W_hh) val = random_float(-0.5f, 0.5f);
-	for (float& val : W_ho) val = random_float(-0.5f, 0.5f);
+	std::mt19937 rng(random_seed);
+	std::uniform_real_distribution<float> weight_dist(-0.5f, 0.5f);
+	for (float& val : W_xh) val = weight_dist(rng);
+	for (float& val : W_hh) val = weight_dist(rng);
+	for (float& val : W_ho) val = weight_dist(rng);
 
 	m_h_history.reserve(64);
 	m_h_history.push_back(h);
+	m_h_history_size = 1;
+	m_h_history_head = 1;
 }
 
 // Loss functions are now member functions
@@ -173,8 +158,10 @@ float lsRNN::get_loss_mse(const vector<float>& predicted, const vector<float>& e
 void lsRNN::reset_state()
 {
 	fill(h.begin(), h.end(), 0.0f);
-	m_h_history.clear();
-	m_h_history.push_back(h);
+	if(m_h_history.empty()) m_h_history.push_back(h);
+	else m_h_history[0] = h;
+	m_h_history_size = 1;
+	m_h_history_head = 1;
 }
 
 void lsRNN::print_weights()
@@ -209,12 +196,20 @@ const vector<float>& lsRNN::forward_pass(const vector<float>& input_vector)
 
 	h = m_h_new;
 
-	// Bound the history: drop the oldest half once we exceed the cap so
-	// long-lived agents cannot grow this without limit.
-	if (m_h_history.size() >= MAX_HISTORY) {
-		m_h_history.erase(m_h_history.begin(), m_h_history.begin() + MAX_HISTORY / 2);
+	// Retain physical slots across calls. Agent::train_step() resets every
+	// tick, so reusing slot 1 here is what keeps that path allocation-free.
+	if(m_h_history_size == m_h_history.size() && m_h_history.size() < MAX_HISTORY)
+	{
+		m_h_history.push_back(h);
+		++m_h_history_size;
+		m_h_history_head = m_h_history_size % MAX_HISTORY;
 	}
-	m_h_history.push_back(h);
+	else
+	{
+		m_h_history[m_h_history_head] = h;
+		m_h_history_head = (m_h_history_head + 1) % MAX_HISTORY;
+		if(m_h_history_size < MAX_HISTORY) ++m_h_history_size;
+	}
 
 	// output = b_o + W_ho.h_new
 	for (size_t i = 0; i < output_dim; ++i) {
@@ -247,10 +242,16 @@ void lsRNN::backpropagate(
 	// The history holds h BEFORE each step plus all intermediate states.
 	// We only need the last T+1 entries, which lets forward_pass run
 	// unbounded batches of steps between backprop calls.
-	if (T + 1 > m_h_history.size()) {
+	if (T + 1 > m_h_history_size) {
 		throw invalid_argument("lsRNN::backpropagate: input sequence longer than recorded history");
 	}
-	const size_t base = m_h_history.size() - T - 1; // m_h_history[base] is h BEFORE inputs[0]
+	const size_t base = m_h_history_size - T - 1; // logical index of h BEFORE inputs[0]
+	const auto history_at = [&](const size_t logical_index) -> const vector<float>& {
+		const size_t physical_index = m_h_history_size == MAX_HISTORY
+			? (m_h_history_head + logical_index) % MAX_HISTORY
+			: logical_index;
+		return m_h_history[physical_index];
+	};
 
 	// Zero the reused gradient scratch
 	for (auto& row : m_dW_xh) fill(row.begin(), row.end(), 0.0f);
@@ -262,8 +263,8 @@ void lsRNN::backpropagate(
 
 	for(int t = static_cast<int>(T) - 1; t >= 0; --t)
 	{
-		const vector<float>& h_next = m_h_history[base + static_cast<size_t>(t) + 1];
-		const vector<float>& h_prev = m_h_history[base + static_cast<size_t>(t)];
+		const vector<float>& h_next = history_at(base + static_cast<size_t>(t) + 1);
+		const vector<float>& h_prev = history_at(base + static_cast<size_t>(t));
 
 		// Calculate the output gradient based on the task
 		switch (m_task) {
@@ -385,4 +386,19 @@ void lsRNN::apply_and_clear_gradients(float learning_rate, size_t batch_size)
 	fill(m_dW_ho_acc.begin(), m_dW_ho_acc.end(), 0.0f);
 	fill(m_db_h_acc.begin(), m_db_h_acc.end(), 0.0f);
 	fill(m_db_o_acc.begin(), m_db_o_acc.end(), 0.0f);
+}
+
+state_checksum::type lsRNN::checksum() const
+{
+	auto hash = state_checksum::initial;
+	state_checksum::add(hash, input_dim);
+	state_checksum::add(hash, hidden_dim);
+	state_checksum::add(hash, output_dim);
+	state_checksum::add(hash, static_cast<std::uint64_t>(m_task));
+	for(const auto* values : {&W_xh, &W_hh, &W_ho, &b_h, &b_o, &h,
+		&m_dW_xh_acc, &m_dW_hh_acc, &m_dW_ho_acc, &m_db_h_acc, &m_db_o_acc})
+	{
+		state_checksum::add(hash, std::span<const float>(*values));
+	}
+	return hash;
 }

@@ -5,6 +5,11 @@
 
 #include <vector>
 #include <memory>
+#include <cstdint>
+#include <random>
+#include <span>
+
+#include "StateChecksum.h"
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp> // Added for quaternion support
 
@@ -15,7 +20,8 @@ using namespace std;
 class ls3DRNN
 {
 public:
-	ls3DRNN(size_t command_dim, const vector<size_t>& hidden_dims);
+	ls3DRNN(size_t command_dim, const vector<size_t>& hidden_dims, std::uint32_t random_seed = std::random_device{}());
+	ls3DRNN(size_t command_dim, const vector<size_t>& hidden_dims, std::mt19937& rng);
 	
 	~ls3DRNN();
 	ls3DRNN(const ls3DRNN& other);
@@ -31,17 +37,23 @@ public:
 	// Manually sets the hidden state of the RNN. Essential for Teacher Forcing.
 	// param: new_state The new 4x4 matrix to use as the hidden state.
 	void set_state(const glm::mat4& new_state);
-	void mutate(float mutation_rate, float mutation_amount);
+	void mutate(float mutation_rate, float mutation_amount, std::mt19937& rng);
 	
 	vector<float> get_prediction(const vector<float>& command) const;
 
 	// This function now only calculates and accumulates gradients for one step.
 	void train_step(const vector<float>& command, const vector<float>& target_params, float rotation_weight);
+	// All brains must have identical layer dimensions. Inputs/targets are arrays
+	// of pointers to per-agent scratch, so batching adds no steady-state copies.
+	static void train_batch(std::span<ls3DRNN* const> brains,
+		std::span<const vector<float>* const> commands,
+		std::span<const vector<float>* const> targets, float rotation_weight);
 	// This new function applies the accumulated gradients and resets them.
 	void apply_and_clear_gradients(float learning_rate, size_t batch_size);
 	
 	// Returns the dimensions of the hidden layers.
 	vector<size_t> get_hidden_layer_dims() const;
+	state_checksum::type checksum() const;
 	
 private:
 	glm::mat4 m_hidden_state;

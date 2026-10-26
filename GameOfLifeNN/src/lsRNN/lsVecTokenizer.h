@@ -28,7 +28,7 @@ public:
 	void add_token_onehot(size_t token_id);
 
 	// Find.
-	const vector<float>& find_vector(size_t token_id);
+	const vector<float>& find_vector(size_t token_id) const;
 	size_t find_tokenId(const vector<float>& predicted_vector) const;
 	vector<size_t> find_n_closest_tokenIds(const vector<float>& predicted_vector, size_t n) const;
 

@@ -2,6 +2,7 @@
 // copy independence, training keeps state finite.
 
 #include "ls3DRNN.h"
+#include "BrainCatalog.h"
 #include "test_framework.h"
 
 TEST_CASE(process_step_returns_finite_transform_with_clamped_translation)
@@ -56,6 +57,49 @@ TEST_CASE(train_and_apply_keeps_prediction_finite)
 
 	const vector<float> params = brain.get_prediction(command);
 	for(float v : params) CHECK(std::isfinite(v));
+}
+
+TEST_CASE(batched_training_matches_scalar_reference_exactly)
+{
+	constexpr std::size_t count = 4;
+	std::vector<ls3DRNN> scalar;
+	std::vector<ls3DRNN> batched;
+	std::vector<ls3DRNN*> brains;
+	std::vector<const vector<float>*> commands;
+	std::vector<const vector<float>*> targets;
+	std::vector<vector<float>> input_values;
+	std::vector<vector<float>> target_values;
+	scalar.reserve(count);
+	batched.reserve(count);
+	brains.reserve(count);
+	commands.reserve(count);
+	targets.reserve(count);
+	input_values.reserve(count);
+	target_values.reserve(count);
+	for(std::size_t i = 0; i < count; ++i)
+	{
+		scalar.emplace_back(5, movement_hidden_dims(BrainTier::SMALL), static_cast<std::uint32_t>(100 + i));
+		batched.emplace_back(5, movement_hidden_dims(BrainTier::SMALL), static_cast<std::uint32_t>(100 + i));
+		input_values.emplace_back(5, 0.1f * static_cast<float>(i + 1));
+		target_values.emplace_back(7, -0.05f * static_cast<float>(i));
+		brains.push_back(&batched.back());
+		commands.push_back(&input_values.back());
+		targets.push_back(&target_values.back());
+		scalar[i].train_step(input_values[i], target_values[i], 0.25f);
+	}
+	ls3DRNN::train_batch(brains, commands, targets, 0.25f);
+	for(std::size_t i = 0; i < count; ++i)
+	{
+		CHECK(scalar[i].checksum() == batched[i].checksum());
+		const vector<float> expected = scalar[i].get_prediction(input_values[i]);
+		const vector<float> actual = batched[i].get_prediction(input_values[i]);
+		for(std::size_t j = 0; j < expected.size(); ++j) CHECK_NEAR(actual[j], expected[j], 0.0f);
+		scalar[i].apply_and_clear_gradients(0.01f, 1);
+		batched[i].apply_and_clear_gradients(0.01f, 1);
+		scalar[i].process_step(input_values[i], 1.0f);
+		batched[i].process_step(input_values[i], 1.0f);
+		CHECK(scalar[i].checksum() == batched[i].checksum());
+	}
 }
 
 TEST_MAIN

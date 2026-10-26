@@ -5,6 +5,7 @@ set(coreSources
 	src/Agent.cpp
 	src/Simulation.cpp
 	src/SpatialGrid.cpp
+	src/ThreadPool.cpp
 	src/lsRNN/lsRNN.cpp
 	src/lsRNN/lsVecTokenizer.cpp
 	src/ls3DRNN/ls3DRNN.cpp

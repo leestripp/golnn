@@ -72,3 +72,23 @@ add_executable(golnn_test_lsvec_tokenizer test/lsvec_tokenizer_test.cpp)
 target_link_libraries(golnn_test_lsvec_tokenizer PRIVATE golnn_core golnn-warnings)
 target_include_directories(golnn_test_lsvec_tokenizer PRIVATE test)
 add_test(NAME lsvec_tokenizer COMMAND golnn_test_lsvec_tokenizer)
+
+add_executable(golnn_test_determinism test/determinism_test.cpp)
+target_link_libraries(golnn_test_determinism PRIVATE golnn_core golnn-warnings)
+target_include_directories(golnn_test_determinism PRIVATE test)
+add_test(NAME determinism COMMAND golnn_test_determinism)
+
+add_executable(golnn_test_agent test/agent_test.cpp)
+target_link_libraries(golnn_test_agent PRIVATE golnn_core golnn-warnings)
+target_include_directories(golnn_test_agent PRIVATE test)
+add_test(NAME agent COMMAND golnn_test_agent)
+
+add_executable(golnn_test_thread_pool test/thread_pool_test.cpp)
+target_link_libraries(golnn_test_thread_pool PRIVATE golnn_core golnn-warnings)
+target_include_directories(golnn_test_thread_pool PRIVATE test)
+add_test(NAME thread_pool COMMAND golnn_test_thread_pool)
+
+add_executable(golnn_test_ecology test/ecology_test.cpp)
+target_link_libraries(golnn_test_ecology PRIVATE golnn_core golnn-warnings)
+target_include_directories(golnn_test_ecology PRIVATE test)
+add_test(NAME ecology COMMAND golnn_test_ecology)

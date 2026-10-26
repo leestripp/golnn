@@ -7,10 +7,13 @@ Guidance for AI coding agents working in this repository.
 ## Project Overview
 
 **GameOfLifeNN** (binary: `golnn`, v0.9.0) is an Artificial Life (A-Life) simulation
-written in C++20. Autonomous 3D agents with evolving Recurrent Neural Network (RNN)
+written in C++23. Autonomous 3D agents with evolving Recurrent Neural Network (RNN)
 "brains" compete for food, reproduce with mutation, and adapt over generations in a
 bounded OpenGL-rendered world. The goal is emergent behavior (flocking, pursuit-evasion,
 population dynamics) from simple rules plus natural selection.
+
+New agents use standardized small/medium/large tiers from `BrainCatalog.h`; mixed
+tier populations are supported and offspring inherit their parent's tier.
 
 Each agent has a **dual-brain architecture**:
 
@@ -22,13 +25,14 @@ Each agent has a **dual-brain architecture**:
 
 Agent types: **Feeders** (blue, eat vegetation, flee predators) and **Predators**
 (yellow, hunt feeders; fallback to meat, then each other). Dead feeders drop `MEAT`
-food inside world bounds. Vegetation regrows on a timer.
+food inside world bounds. Vegetation uses bounded adaptive regrowth by default
+(with the original fixed-timer mode available in `SimulationConfig`).
 
 ## Tech Stack
 
 | Area      | Technology                                   |
 |-----------|----------------------------------------------|
-| Language  | C++20 (`CMAKE_CXX_STANDARD 20`, required)    |
+| Language  | C++23 (`CMAKE_CXX_STANDARD 23`, required)    |
 | GUI       | gtkmm-4.0 (windowing, event controllers)     |
 | Graphics  | OpenGL + GLEW, custom GTK OpenGL widget      |
 | Math      | GLM (header-only)                            |
@@ -47,12 +51,13 @@ sudo apt-get install build-essential cmake pkg-config cppcheck \
 ## Build, Run, Verify
 
 ```bash
-# Configure & build (CMakePresets.json: default/debug/release/asan/ubsan)
+# Configure & build (CMakePresets.json: default/debug/release/asan/ubsan/tsan)
 cmake --preset default
 cmake --build --preset default -j
 
 # Headless benchmark — no display needed: ticks agents food world
-./build/golnn_bench 300 1000 500 100
+./build/golnn_bench 300 1000 500 100 --samples 3 --seed 42 --workers 12
+# Add --fixed-food for original regrowth, --telemetry run.csv for ecology data
 
 # Smoke test (CTest): constructs a Simulation and ticks it 100x
 ctest --test-dir build
@@ -67,7 +72,7 @@ cmake --preset asan && cmake --build --preset asan && ctest --test-dir build-asa
 cmake --build --target cppcheck
 ```
 
-- Default preset is `Release` (`-O3`); `Debug` adds `-g`; `asan`/`ubsan` enable
+- Default preset is `Release` (`-O3`); `Debug` adds `-g`; `asan`/`ubsan`/`tsan` enable
   the sanitizers for the core library, bench, and test.
 - Verification = warning-clean build (warnings are errors in spirit) + the
   full CTest suite (`smoke` + per-component unit tests) + `golnn_bench` A/B
@@ -86,7 +91,8 @@ cmake --build --target cppcheck
   `GLEW::glew`, `OpenGL::GL`.
 - `golnn_smoke_test` — CTest-registered smoke test (repo-root `test/smoke_test.cpp`).
 - `golnn_test_spatial_grid`, `golnn_test_lsrnn`, `golnn_test_ls3drnn`,
-  `golnn_test_lsvec_tokenizer` — unit tests (repo-root `test/`), each a separate
+  `golnn_test_lsvec_tokenizer`, `golnn_test_agent`, `golnn_test_determinism`,
+  `golnn_test_thread_pool`, `golnn_test_ecology` — unit tests (repo-root `test/`), each a separate
   CTest entry. They use the framework-free harness in `test/test_framework.h`
   (`TEST_CASE`/`CHECK`/`CHECK_NEAR`/`TEST_MAIN`); add new component tests the
   same way and register them with `add_test`.
@@ -118,7 +124,8 @@ build/                    # Out-of-source build dir (gitignored)
 ```
 
 Runtime controls: `WASD` camera, `Shift` sprint, mouse-drag look, `E` spawn 20 agents,
-`R` spawn 100 food, `Esc` quit. Tick rate ~33 ms (`TICK_RATE_MS` in `main.cpp`).
+`R` spawn 100 food, `1`/`2`/`3` select small/medium/large brains for new agents,
+`Esc` quit. Tick rate ~33 ms (`TICK_RATE_MS` in `main.cpp`).
 
 ## Code Style & Conventions
 
@@ -133,9 +140,10 @@ Runtime controls: `WASD` camera, `Shift` sprint, mouse-drag look, `E` spawn 20 a
   written accordingly. Match this in existing files; prefer explicit `std::` in **new**
   headers where it doesn't clash with surrounding style.
 - Enums are `enum class` with `UPPER_SNAKE` values (`AgentType::FEEDER`, `State::HUNT`).
-- Randomness: `std::random_device` + `std::mt19937` statics (see `Agent.cpp`), not `rand()`.
-- Config limits are `static constexpr` members on `Simulation`
-  (e.g. `MAX_AGENTS = 1000`, `MAX_LAYER_COUNT = 10`).
+- Randomness: explicit seeded `std::mt19937` streams from `SimulationConfig` and
+  per-agent engines; no shared RNG statics and no `rand()`.
+- Runtime limits/settings live in `SimulationConfig` (`max_agents`, `max_food`,
+  worker count, regrowth, brain tier); tensor shapes live in `BrainCatalog.h`.
 - Warning flags: `-Wall -Wextra` globally. **Keep the build warning-clean**; warnings
   are errors in spirit.
 - Comments are plentiful explanatory `//` comments — follow that habit for
@@ -147,20 +155,26 @@ Runtime controls: `WASD` camera, `Shift` sprint, mouse-drag look, `E` spawn 20 a
   the rules (eating order, detection distances, direction-vs-position teaching,
   population caps) are documented in the code comments and Readme.md; read them
   before modifying that logic.
-- Guard population explosions: check `MAX_AGENTS` before spawning/reproducing.
+- Guard population explosions: check `m_config.max_agents` before spawning/reproducing.
 - Any position dropped into the world (e.g. `MEAT` food) must be clamped inside world
   bounds — agents can die outside them.
 - The simulation runs on a GLib timeout in the GTK main loop; keep per-tick work
-  cheap (1000 agents × per-tick ticks at ~30 fps).
-- Hot-path rules (post-M1/M2, see Plan.md): all NN math is `float` in flat
+  cheap. Agent updates run in a persistent thread pool (default hardware concurrency),
+  while interactions/reproduction stay serial. `worker_count = 1` is the serial fallback.
+- Hot-path rules (post-M1/M2, see plan.md): all NN math is `float` in flat
   contiguous arrays; `perceive()`/`train_state_brain()`/NN forward passes reuse
   member scratch buffers (no per-tick heap allocations); `Simulation` rebuilds
-  its four type-partitioned `SpatialGrid`s each tick and all proximity queries
-  go through them (never linear scans of `m_agents`/`m_food`). If you add a new
+  its type-partitioned `SpatialGrid`s and all proximity queries
+  go through them (never linear scans of `m_agents`/`m_food`). Perception reads
+  other agents from the immutable start-of-tick transform snapshot, never live
+  transforms being mutated by workers. If you add a new
   proximity query, add it to the grids — don't reintroduce an O(n) scan.
-- `ls3DRNN::forward()` is memoized (Agent calls train_step then process_step with
-  the same input each tick). Any change that mutates weights must invalidate the
-  cache — `optimizer_step()` and `mutate()` already do; keep that invariant.
+- `ls3DRNN::forward()` is memoized (movement training is followed by process_step
+  with the same input). Any change that mutates weights must invalidate the cache —
+  `optimizer_step()` and `mutate()` already do; keep that invariant. Simulation splits
+  Agent update into prepare/train/finish phases and calls `train_batch()` only on
+  matching catalog tiers; `BrainTier::CUSTOM` always uses the scalar path. Scalar and
+  batched execution must remain checksum-equivalent.
 - **Wayland + GLEW gotcha**: under Wayland, GTK4's GLArea hands GLEW an EGL
   context, so `glewInit()` returns `GLEW_ERROR_NO_GLX_DISPLAY` (4). GLEW loads
   all *core* GL function pointers before that GLX probe fails, so the error is

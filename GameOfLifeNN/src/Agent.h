@@ -6,6 +6,11 @@
 #include "lsVecTokenizer.h"
 #include <glm/glm.hpp>
 #include <vector>
+#include <cstdint>
+#include <random>
+
+#include "StateChecksum.h"
+#include "BrainCatalog.h"
 
 // Forward declaration
 class Simulation;
@@ -29,9 +34,16 @@ public:
 		FLEE
 	};
 	
-	Agent(ls3DRNN brain, const glm::mat4& initial_transform, AgentType type, float learning_rate = -1.0f, float initial_energy = -1.0f, size_t state_hidden_dim = 0);
+	Agent(ls3DRNN brain, const glm::mat4& initial_transform, AgentType type, float learning_rate = -1.0f, float initial_energy = -1.0f, size_t state_hidden_dim = 0, std::uint32_t random_seed = std::random_device{}(), BrainTier brain_tier = BrainTier::CUSTOM);
  	
 	void update(const Simulation& world);
+	bool prepare_update(const Simulation& world);
+	void train_movement();
+	void finish_update(const Simulation& world);
+	bool movement_pending() const { return m_movement_pending; }
+	BrainTier brain_tier() const { return m_brain_tier; }
+	static constexpr float movement_rotation_weight() { return ROTATION_WEIGHT; }
+	const std::vector<float>& movement_target() const { return m_movement_target; }
 	
 	bool isDead() const;
 	bool canReproduce() const;
@@ -39,6 +51,7 @@ public:
 	
 	float get_learning_rate() const;
 	size_t get_state_brain_hidden_dim() const;
+	state_checksum::type checksum() const;
 	
 	// -- Public State --
 	ls3DRNN m_brain;
@@ -71,7 +84,7 @@ public:
 
 private:
 	void update_state_transitions(const Simulation& world);
-	void train_brain(const std::vector<float>& perception_vector);
+	void prepare_brain_target(const std::vector<float>& perception_vector);
 	void train_state_brain(const Simulation& world);
 	// Fills and returns the reused m_perception scratch buffer. update() writes
 	// the state one-hot indices [27-30] into it after calling this.
@@ -82,10 +95,14 @@ private:
 	glm::vec3 m_food_pos;
 	glm::vec3 m_follow_agent_pos; // For roaming with other feeders
 	glm::vec3 m_threat_pos;	   // Position of predator to flee from, or prey to hunt
+	BrainTier m_brain_tier;
+	bool m_movement_pending = false;
+	std::vector<float> m_movement_target;
 	
 	glm::vec3 m_base_color;	  // Base color determined by agent type
 	float m_energy_decay_rate; // Agent's specific energy decay per tick
 	float m_learning_rate;	 // Each agent has its own learning rate
+	std::mt19937 m_rng; // Per-agent stream: safe for parallel updates and reproduction
 	size_t m_state_brain_hidden_dim; // Number of neurons in the state brain's hidden layer
 	lsRNN m_state_brain;	   // New state-selection brain
 	

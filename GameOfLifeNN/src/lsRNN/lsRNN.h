@@ -14,6 +14,9 @@
 #include <algorithm>
 #include <queue>
 #include <functional>
+#include <cstdint>
+
+#include "StateChecksum.h"
 
 using namespace std;
 
@@ -31,7 +34,7 @@ public:
 	// it halves memory traffic, and it vectorizes better.
 	using value_type = float;
 
-	explicit lsRNN(size_t input_dim, size_t hidden_dim, size_t output_dim, Task task);
+	explicit lsRNN(size_t input_dim, size_t hidden_dim, size_t output_dim, Task task, std::uint32_t random_seed = std::random_device{}());
 
 	// Forward pass. Returns a reference to an internal output buffer that is
 	// overwritten by the next forward_pass call - copy it if you need to keep it.
@@ -53,6 +56,7 @@ public:
 	float get_loss_mse(const vector<float>& predicted, const vector<float>& expected);
 
 	void reset_state();
+	state_checksum::type checksum() const;
 
 	// Utils.
 	pair<float, float> find_min_max(const vector<float>& data);
@@ -64,8 +68,6 @@ public:
 
 private:
 	// Utility functions
-	float random_float(float min, float max);
-	vector<float> create_random_vector(size_t size);
 
 	// Activations
 	void softmax(vector<float>& vec);
@@ -110,7 +112,11 @@ private:
 	// appends forever and long-lived agents leak memory. backpropagate()
 	// always reads the LAST inputs.size() steps of history.
 	vector<float> h;
+	// Physical storage is retained across reset_state() calls. The logical
+	// ring below avoids both per-tick allocations and large erase/memmove work.
 	vector<vector<float>> m_h_history;
+	size_t m_h_history_size = 0;
+	size_t m_h_history_head = 0; // next physical slot to write when wrapping
 	static constexpr size_t MAX_HISTORY = 1024; // steps; older entries are dropped
 
 	// Members for gradient accumulation (same flat layouts as the weights)
