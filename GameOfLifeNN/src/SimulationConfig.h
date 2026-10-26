@@ -28,11 +28,16 @@ struct SimulationConfig
 	std::size_t worker_count = 0;
 
 	BrainTier brain_tier = BrainTier::SMALL;
+	std::size_t state_teacher_ticks = 300;
+	std::size_t state_autonomy_ramp_ticks = 2000;
+	float state_exploration_rate = 0.05f;
 	bool use_batched_brains = true;
 	// GUI builds publish immutable render snapshots; headless users can opt out.
 	bool publish_render_snapshots = true;
 
 	FoodRegrowthMode food_regrowth_mode = FoodRegrowthMode::ADAPTIVE;
+	float vegetation_cluster_probability = 0.75f;
+	float vegetation_cluster_radius = 1.0f;
 	float target_vegetation_per_feeder = 0.5f;
 	std::size_t food_balance_interval_ticks = 30;
 	std::size_t max_food_per_balance = 50;

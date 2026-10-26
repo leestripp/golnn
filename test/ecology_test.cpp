@@ -59,4 +59,31 @@ TEST_CASE(csv_telemetry_contains_ecology_rows)
 	std::filesystem::remove(path);
 }
 
+TEST_CASE(vegetation_spread_forms_local_patches)
+{
+	SimulationConfig config;
+	config.worker_count = 1;
+	config.max_food = 100;
+	config.vegetation_cluster_probability = 1.0f;
+	config.vegetation_cluster_radius = 5.0f;
+	Simulation sim(0, 0, 100.0f, config);
+	sim.m_food.push_back({FoodType::VEGETABLE, glm::vec3(10.0f, -5.0f, 2.0f)});
+	sim.spawn_new_food(40, 0.8f);
+	CHECK(sim.m_food.size() == 41);
+	bool found_spread = false;
+	for(std::size_t i = 1; i < sim.m_food.size(); ++i)
+	{
+		bool has_local_parent = false;
+		for(std::size_t j = 0; j < i; ++j)
+		{
+			const float distance = glm::distance(sim.m_food[i].position, sim.m_food[j].position);
+			has_local_parent = has_local_parent || distance <= 5.0f + 1e-4f;
+		}
+		CHECK(has_local_parent);
+		found_spread = found_spread
+			|| glm::distance(sim.m_food[i].position, glm::vec3(10.0f, -5.0f, 2.0f)) > 0.1f;
+	}
+	CHECK(found_spread);
+}
+
 TEST_MAIN

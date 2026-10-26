@@ -32,7 +32,11 @@ public:
 		IDLE,
 		ROAM,
 		HUNT,
-		FLEE
+		FLEE,
+		REST,
+		GRAZE,
+		EXPLORE,
+		INVESTIGATE
 	};
 	
 	Agent(ls3DRNN brain, const glm::mat4& initial_transform, AgentType type, float learning_rate = -1.0f, float initial_energy = -1.0f, size_t state_hidden_dim = 0, std::uint32_t random_seed = std::random_device{}(), BrainTier brain_tier = BrainTier::CUSTOM);
@@ -62,10 +66,11 @@ public:
 	float m_energy;
 	int m_age;
 	State m_state;	 // The current state of the agent
+	float m_autonomy = 0.0f; // 0 = teacher-selected, 1 = network-selected
 	glm::vec3 m_color; // Final color for visualization, adjusted for energy
 	AgentType m_type;  // The type of agent
  	
-	// Versioned layout is documented in Perception.h. v2 preserves v1 channels
+	// Versioned layout is documented in Perception.h. v3 preserves v1 channels
 	// and appends motion, goal, energy-trend, density, and proximity signals.
 	static constexpr size_t PERCEPTION_VECTOR_SIZE = perception::COUNT;
 
@@ -74,7 +79,7 @@ public:
 	static constexpr size_t NUM_DISTANCE_BINS = 4;		// For enemy distance
 	static constexpr size_t NUM_FOOD_DISTANCE_BINS = 4;   // For food distance
 	static constexpr size_t STATE_BRAIN_INPUT_DIM = perception::STATE_INPUT_COUNT;
-	static constexpr size_t NUM_STATES = 4; // IDLE, ROAM, HUNT, FLEE
+	static constexpr size_t NUM_STATES = 8;
 	// State brain hidden layer size is now randomized on creation
 	static constexpr size_t MIN_STATE_NEURONS = 4;
 	static constexpr size_t MAX_STATE_NEURONS = 32;
@@ -83,9 +88,11 @@ public:
 	std::vector<float> m_state_input_scratch; // scratch, reused every tick by train_state_brain()
 
 private:
-	void update_state_transitions(const Simulation& world);
+	State update_state_transitions(const Simulation& world);
+	void prepare_state_input(const Simulation& world);
+	State select_state(const Simulation& world, State teacher_state);
 	void prepare_brain_target(std::vector<float>& perception_vector);
-	void train_state_brain(const Simulation& world);
+	void train_state_brain(State teacher_state);
 	// Fills and returns the reused m_perception scratch buffer. update() writes
 	// the state one-hot indices [27-30] into it after calling this.
 	std::vector<float>& perceive(const Simulation& world);

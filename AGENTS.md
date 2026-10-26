@@ -152,12 +152,22 @@ Runtime controls: `WASD` camera, `Shift` sprint, mouse-drag look, `E` spawn 20 a
 
 ## Conventions & Gotchas for Agents
 
-- Perception layout v2 lives in `Perception.h`: channels 0-30 are legacy-compatible,
-  31-44 add motion/goal/context. Use named indices, not new magic numbers. Vision is
+- Perception layout v3 lives in `Perception.h`: channels 0-30 are legacy-compatible,
+  27-34 hold eight states, and 35-49 add motion/goal/context/autonomy. Use named
+  indices, not new magic numbers. Vision is
   300 degrees; scent/hearing are omnidirectional. Share spatial-grid visits for
   related senses. `m_sound_events` holds new interaction events and
   `m_audible_sound_events` holds the previous tick for perception; do not clear the
   audible buffer before agents sense it.
+- Vegetation propagation: default 75% of spawns spread from an existing plant within
+  1 unit; 25% seed new patches. `vegetation_cluster_probability = 0` restores uniform
+  spawning. Propagation is transitive (children can leave the founder's radius), and
+  meat placement is unchanged. Keep spawning serial and deterministic.
+- State autonomy: 300 teacher ticks, then a 2,000-tick handover ramp and 5% bounded
+  exploration (`SimulationConfig`). Teacher gradients fade with autonomy. Offspring
+  inherit and mutate both brains plus autonomy; do not randomize the state brain on
+  reproduction. New states are REST/GRAZE/EXPLORE/INVESTIGATE. No scripted social rules.
+  Setting `state_autonomy_ramp_ticks = 0` preserves teacher-only behavior for comparison.
 - Teacher forcing and reproduction/mutation logic are the simulation's core —
   the rules (eating order, detection distances, direction-vs-position teaching,
   population caps) are documented in the code comments and Readme.md; read them

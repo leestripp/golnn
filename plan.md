@@ -88,6 +88,38 @@ not a controlled FPS result. A stochastic RNN test was seeded, and OpenGL unreal
 fixed to use its live context directly. Remaining cleanup: a common abstract renderer
 interface and explicit FPS/GPU-time instrumentation if deeper comparison is needed.
 
+### Propagating vegetation patches — completed
+
+Vegetation now spreads from existing plants: 75% of spawns choose an existing
+vegetation item and appear within a 1-unit radius; the remaining 25% seed new patches.
+Propagation is transitive, so patches can expand while new hotspots continue to appear.
+Meat remains tied to death locations. `vegetation_cluster_probability` and
+`vegetation_cluster_radius` are configurable, with uniform spawning available by setting
+the probability to zero. This changes the environment, not agent behavior rules.
+
+A regression test verifies that every propagated item has an earlier plant within the
+configured radius. All tiers completed healthy 3,000-tick runs, with increased feeding
+activity and strong reproduction. Full sanitizer and Vulkan validation checks pass.
+
+### Teacher-to-autonomous state selection — completed
+
+The state brain now has eight outputs: IDLE, ROAM, HUNT, FLEE, REST, GRAZE, EXPLORE,
+and INVESTIGATE. The first 300 agent ticks remain teacher-guided; autonomy then ramps
+linearly over 2,000 ticks. Network choice uses bounded 5% uniform exploration, while
+teacher gradients fade to zero at full autonomy. This is a handover mechanism, not a
+claim of a complete new reinforcement-learning algorithm.
+
+Offspring now inherit the parent's state brain and autonomy and apply bounded mutation,
+instead of discarding the state policy with a new random network. The movement targets
+for new states stay simple (rest, slow graze, forward exploration, scent investigation);
+no social/herding rules were added. Perception layout v3 expands the state block and adds
+autonomy to movement/state inputs. UI and CSV expose mean autonomy and new-state counts.
+
+Focused tests prove teacher-phase stability, exploration reachability, zero REST teacher
+translation, deterministic bounded mutation, and inheritance. Healthy 3,000-tick runs
+completed on every tier with all new states occupied. Release, ASan, UBSan, TSan, and
+Vulkan validation all pass.
+
 ### Richer sensor system — completed
 
 Perception layout v2 (`Perception.h`) preserves channels 0-30 and appends normalized
@@ -298,7 +330,7 @@ measurable behavioral value that justifies their compute cost.
 
 ## M6 — Learning, Evolution, and Persistence
 
-- [ ] Anneal teacher forcing gradually per agent/generation, with safe fallback and
+- [x] Anneal teacher forcing gradually per agent/generation, with safe fallback and
       telemetry for the teacher-to-autonomy transition.
 - [ ] Add temperature-controlled state exploration instead of permanent hard argmax;
       anneal exploration and log state occupancy.

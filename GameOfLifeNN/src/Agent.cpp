@@ -27,10 +27,8 @@ namespace
 		// mutable initialization flag.
 		static const lsVecTokenizer tokenizer = [] {
 			lsVecTokenizer result(Agent::NUM_STATES);
-			result.add_token_onehot(static_cast<size_t>(Agent::State::IDLE));
-			result.add_token_onehot(static_cast<size_t>(Agent::State::ROAM));
-			result.add_token_onehot(static_cast<size_t>(Agent::State::HUNT));
-			result.add_token_onehot(static_cast<size_t>(Agent::State::FLEE));
+			for(std::size_t state = 0; state < Agent::NUM_STATES; ++state)
+				result.add_token_onehot(state);
 			return result;
 		}();
 		return tokenizer;
@@ -121,14 +119,31 @@ bool Agent::prepare_update(const Simulation& world)
 	if(isDead()) return false;
 
 	m_prev_transform = m_transform;
+	if(m_age > static_cast<int>(world.get_config().state_teacher_ticks)
+		&& world.get_config().state_autonomy_ramp_ticks > 0)
+	{
+		m_autonomy = std::min(1.0f, m_autonomy
+			+ 1.0f / static_cast<float>(world.get_config().state_autonomy_ramp_ticks));
+	}
 	std::vector<float>& perception_vector = perceive(world);
-	update_state_transitions(world);
-
+	perception_vector[perception::AUTONOMY] = m_autonomy;
+	const State teacher_state = update_state_transitions(world);
+	m_state = teacher_state;
 	std::fill(perception_vector.begin() + perception::STATE_ONE_HOT,
 		perception_vector.begin() + perception::STATE_ONE_HOT + NUM_STATES, 0.0f);
 	perception_vector[perception::STATE_ONE_HOT + static_cast<std::size_t>(m_state)] = 1.0f;
 	prepare_brain_target(perception_vector);
-	train_state_brain(world);
+	prepare_state_input(world);
+	const State selected_state = select_state(world, teacher_state);
+	if(selected_state != teacher_state)
+	{
+		m_state = selected_state;
+		std::fill(perception_vector.begin() + perception::STATE_ONE_HOT,
+			perception_vector.begin() + perception::STATE_ONE_HOT + NUM_STATES, 0.0f);
+		perception_vector[perception::STATE_ONE_HOT + static_cast<std::size_t>(m_state)] = 1.0f;
+		prepare_brain_target(perception_vector);
+	}
+	train_state_brain(teacher_state);
 	m_movement_pending = true;
 	return true;
 }
@@ -148,7 +163,7 @@ void Agent::finish_update(const Simulation& world)
 	if(m_gradient_accumulation_step >= BATCH_SIZE)
 	{
 		m_brain.apply_and_clear_gradients(m_learning_rate, BATCH_SIZE);
-		m_state_brain.apply_and_clear_gradients(m_learning_rate, BATCH_SIZE);
+		m_state_brain.apply_and_clear_gradients(m_learning_rate * (1.0f - m_autonomy), BATCH_SIZE);
 		m_gradient_accumulation_step = 0;
 	}
 
@@ -426,12 +441,13 @@ std::vector<float>& Agent::perceive(const Simulation& world)
 	values[perception::HEADING + 1] = agent_fwd.y;
 	values[perception::HEADING + 2] = agent_fwd.z;
 	values[perception::ENERGY_TREND] = std::clamp(m_energy_trend, -1.0f, 1.0f);
+	values[perception::AUTONOMY] = m_autonomy;
 	return values;
 }
 
 // Rule-based teacher for the high-level state. The state brain learns from
 // these transitions; richer continuous inputs are appended in train_state_brain().
-void Agent::update_state_transitions(const Simulation& /* world */)
+Agent::State Agent::update_state_transitions(const Simulation& /* world */)
 {
 	State next_state;
 	if(m_type == AgentType::FEEDER)
@@ -448,7 +464,7 @@ void Agent::update_state_transitions(const Simulation& /* world */)
 			next_state = State::HUNT;
 		else next_state = State::ROAM;
 	}
-	m_state = next_state;
+	return next_state;
 }
 
 // Teacher-forcing for the movement brain using the new directional sensor approach.
@@ -458,10 +474,13 @@ void Agent::prepare_brain_target(std::vector<float>& perception_vector)
 	bool has_target = false;
 
 	glm::vec3 agent_pos = m_transform[3];
+	glm::vec3 agent_fwd = glm::normalize(glm::vec3(m_transform[2]));
+	float desired_speed = MAX_SPEED * 0.2f;
 
 	// Step 1: Determine the ideal PRIMARY direction based on state (the main goal).
 	switch (m_state) {
 		case State::HUNT:
+			desired_speed = MAX_SPEED;
 			// m_food_pos already holds the closest target-type food (vegetable
 			// for feeders, meat for predators) found by perceive() this tick —
 			// reuse it instead of re-scanning the food grid.
@@ -482,6 +501,7 @@ void Agent::prepare_brain_target(std::vector<float>& perception_vector)
 			break;
 
 		case State::FLEE:
+			desired_speed = MAX_SPEED;
 			if (m_threat_pos != glm::vec3(0.0f)) {
 				// Flee directly away from the threat.
 				glm::vec3 dir_from_threat = agent_pos - m_threat_pos;
@@ -493,6 +513,7 @@ void Agent::prepare_brain_target(std::vector<float>& perception_vector)
 			break;
 
 		case State::ROAM:
+			desired_speed = MAX_SPEED * 0.4f;
 			 if (m_follow_agent_pos != glm::vec3(0.0f)) {
 				glm::vec3 dir_to_follow = m_follow_agent_pos - agent_pos;
 				if (glm::length2(dir_to_follow) > 1e-6f) {
@@ -501,6 +522,39 @@ void Agent::prepare_brain_target(std::vector<float>& perception_vector)
 				}
 			 }
 			 // If no target, primary_direction remains (0,0,0).
+			break;
+
+		case State::GRAZE:
+			if(m_food_pos != glm::vec3(0.0f))
+			{
+				const glm::vec3 direction = m_food_pos - agent_pos;
+				if(glm::length2(direction) > 1e-6f)
+				{
+					primary_direction = glm::normalize(direction);
+					has_target = true;
+				}
+			}
+			desired_speed = MAX_SPEED * 0.25f;
+			break;
+
+		case State::EXPLORE:
+			primary_direction = agent_fwd;
+			has_target = true;
+			desired_speed = MAX_SPEED * 0.45f;
+			break;
+
+		case State::INVESTIGATE:
+			primary_direction = glm::vec3(
+				perception_vector[perception::SCENT_DIRECTION],
+				perception_vector[perception::SCENT_DIRECTION + 1],
+				perception_vector[perception::SCENT_DIRECTION + 2]);
+			has_target = glm::length2(primary_direction) > 1e-6f;
+			if(has_target) primary_direction = glm::normalize(primary_direction);
+			desired_speed = MAX_SPEED * 0.55f;
+			break;
+
+		case State::REST:
+			desired_speed = 0.0f;
 			break;
 
 		case State::IDLE:
@@ -539,7 +593,6 @@ void Agent::prepare_brain_target(std::vector<float>& perception_vector)
 	}
 
 
-	glm::vec3 agent_fwd = glm::normalize(glm::vec3(m_transform[2]));
 
 	// --- Calculate Ideal Delta Transform based on the desired direction ---
 	glm::vec3 desired_translation(0.0f);
@@ -547,14 +600,14 @@ void Agent::prepare_brain_target(std::vector<float>& perception_vector)
 
 	if (has_target) {
 		// The ideal translation is to move at max speed in the desired direction.
-		desired_translation = desired_direction * MAX_SPEED;
+		desired_translation = desired_direction * desired_speed;
 		
 		// The ideal rotation is to smoothly turn to face the desired direction.
 		glm::quat target_rot = glm::rotation(agent_fwd, desired_direction);
 		desired_rotation = glm::slerp(glm::quat(1.0f, 0.0f, 0.0f, 0.0f), target_rot, ROTATION_LERP_FACTOR);
 	} else {
 		// For IDLE or ROAM without a target, just move forward slowly.
-		desired_translation = agent_fwd * (MAX_SPEED * 0.2f);
+		desired_translation = agent_fwd * desired_speed;
 	}
 
 	// The goal channels describe the exact teacher goal, including boundary
@@ -581,7 +634,7 @@ void Agent::prepare_brain_target(std::vector<float>& perception_vector)
 }
 
 // New function to train the state-selection RNN
-void Agent::train_state_brain(const Simulation& world)
+void Agent::prepare_state_input(const Simulation& world)
 {
 	// 1. Create the input vector for the state brain directly in the reused
 	//    scratch buffer (three one-hot bin blocks, no per-tick allocations).
@@ -622,13 +675,28 @@ void Agent::train_state_brain(const Simulation& world)
 	input[perception::STATE_BOUNDARY_PROXIMITY] = m_perception[perception::BOUNDARY_PROXIMITY];
 	input[perception::STATE_GOAL_ALIGNMENT] = m_perception[perception::GOAL_ALIGNMENT];
 	input[perception::STATE_SPEED] = std::clamp(glm::length(m_velocity), 0.0f, 1.0f);
+	input[perception::STATE_AUTONOMY] = m_autonomy;
+}
 
-	// 2. One-hot target vector for the current "correct" state (teacher).
-	const size_t target_state_id = static_cast<size_t>(m_state);
-	const auto& target_state_vec = state_tokenizer().find_vector(target_state_id);
+Agent::State Agent::select_state(const Simulation& world, const State teacher_state)
+{
+	if(m_autonomy <= 0.0f) return teacher_state;
+	std::uniform_real_distribution<float> choice(0.0f, 1.0f);
+	if(choice(m_rng) >= m_autonomy) return teacher_state;
+	if(choice(m_rng) < world.get_config().state_exploration_rate)
+	{
+		std::uniform_int_distribution<std::size_t> explore(0, NUM_STATES - 1);
+		return static_cast<State>(explore(m_rng));
+	}
+	const std::vector<float>& probabilities = m_state_brain.forward_pass(m_state_input_scratch);
+	return static_cast<State>(std::distance(probabilities.begin(),
+		std::max_element(probabilities.begin(), probabilities.end())));
+}
 
-	// 3. Single-step training (resets state, forward, length-1 BPTT).
-	m_state_brain.train_step(input, target_state_vec);
+void Agent::train_state_brain(const State teacher_state)
+{
+	const auto& target = state_tokenizer().find_vector(static_cast<std::size_t>(teacher_state));
+	m_state_brain.train_step(m_state_input_scratch, target);
 }
 
 float Agent::get_learning_rate() const
@@ -676,9 +744,11 @@ Agent Agent::reproduce() {
 	Agent child(std::move(child_brain), child_transform, m_type, -1.0f, child_energy,
 		state_hidden_dim(m_brain_tier), m_rng(), m_brain_tier);
 	
-	// Mutate the state brain as well
-	// NOTE: lsRNN does not have a mutate function, so the child gets a new random one.
-	// This is a valid evolutionary strategy.
+	// Preserve the learned state policy across generations, with the same
+	// bounded mutation process used for the movement brain.
+	child.m_state_brain = m_state_brain;
+	child.m_state_brain.mutate(MUTATION_RATE, MUTATION_AMOUNT, m_rng);
+	child.m_autonomy = m_autonomy;
 	
 	return child;
 }
@@ -695,7 +765,7 @@ state_checksum::type Agent::checksum() const
 				state_checksum::add(hash, (*transform)[column][row]);
 	}
 	for(const float value : {m_energy, m_energy_decay_rate, m_learning_rate,
-		m_energy_trend, m_previous_tick_energy, m_velocity.x, m_velocity.y, m_velocity.z})
+		m_energy_trend, m_previous_tick_energy, m_velocity.x, m_velocity.y, m_velocity.z, m_autonomy})
 		state_checksum::add(hash, value);
 	state_checksum::add(hash, static_cast<std::uint64_t>(m_age));
 	state_checksum::add(hash, static_cast<std::uint64_t>(m_state));

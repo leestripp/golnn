@@ -30,7 +30,7 @@ Simulation::Simulation(size_t initial_agents, size_t initial_food, float world_s
 		if(!*m_telemetry_output)
 			throw std::runtime_error("Unable to open telemetry file: " + m_config.telemetry_path);
 		*m_telemetry_output << "tick,feeders,predators,vegetables,meat,births,deaths,"
-		                       "vegetables_eaten,mean_energy,mean_age,idle,roam,hunt,flee,"
+		                       "vegetables_eaten,mean_energy,mean_age,mean_autonomy,idle,roam,hunt,flee,rest,graze,explore,investigate,"
 		                       "brain_small,brain_medium,brain_large\n";
 	}
 	// Initialize with a few agents and some food
@@ -319,24 +319,44 @@ void Simulation::cleanup_dead_agents_and_spawn_offspring()
 void Simulation::spawn_food(size_t count, float food_area_scale, FoodType type)
 {
 	std::uniform_real_distribution<float> dis(-1.0f, 1.0f);
-	// Hard limit on food.
-	if(m_food.size() >= m_config.max_food)
-	{
-		return;
-	}
-	
+	std::uniform_real_distribution<float> chance(0.0f, 1.0f);
+	if(m_food.size() >= m_config.max_food) return;
 	const float food_spawn_radius = (m_world_size * food_area_scale) / 2.0f;
-	
+	const float half_world_size = m_world_size / 2.0f;
+
 	for(size_t i = 0; i < count; ++i)
 	{
-		// Always check our food count.
 		if(m_food.size() >= m_config.max_food) break;
-		
-		// 'dis' is a uniform distribution from -1.0 to 1.0.
-		// Multiplying by the radius gives a random point within the centered cube.
 		glm::vec3 pos(dis(m_rng) * food_spawn_radius,
-					  dis(m_rng) * food_spawn_radius,
-					  dis(m_rng) * food_spawn_radius);
+			dis(m_rng) * food_spawn_radius, dis(m_rng) * food_spawn_radius);
+
+		// Vegetation propagates locally from an existing plant most of the time.
+		// The remaining spawns seed new patches, preventing one global clump.
+		if(type == FoodType::VEGETABLE && !m_food.empty()
+			&& chance(m_rng) < m_config.vegetation_cluster_probability)
+		{
+			const std::size_t first = std::uniform_int_distribution<std::size_t>(0, m_food.size() - 1)(m_rng);
+			const Food* parent = nullptr;
+			for(std::size_t offset = 0; offset < m_food.size(); ++offset)
+			{
+				const Food& candidate = m_food[(first + offset) % m_food.size()];
+				if(candidate.m_food_type == FoodType::VEGETABLE)
+				{
+					parent = &candidate;
+					break;
+				}
+			}
+			if(parent != nullptr)
+			{
+				glm::vec3 direction(dis(m_rng), dis(m_rng), dis(m_rng));
+				if(glm::length2(direction) < 1e-6f) direction = glm::vec3(1.0f, 0.0f, 0.0f);
+				const float radius = m_config.vegetation_cluster_radius * std::cbrt(chance(m_rng));
+				pos = parent->position + glm::normalize(direction) * radius;
+				pos.x = std::clamp(pos.x, -half_world_size, half_world_size);
+				pos.y = std::clamp(pos.y, -half_world_size, half_world_size);
+				pos.z = std::clamp(pos.z, -half_world_size, half_world_size);
+			}
+		}
 		m_food.push_back({type, pos});
 	}
 }
@@ -502,6 +522,7 @@ EcologyStats Simulation::ecology_stats() const
 		else ++stats.predators;
 		energy_sum += agent.m_energy;
 		stats.mean_age += static_cast<double>(agent.m_age);
+		stats.mean_autonomy += static_cast<double>(agent.m_autonomy);
 		const auto state_index = static_cast<std::size_t>(agent.m_state);
 		if(state_index < stats.state_counts.size()) ++stats.state_counts[state_index];
 		const auto tier_index = static_cast<std::size_t>(agent.brain_tier());
@@ -516,6 +537,7 @@ EcologyStats Simulation::ecology_stats() const
 	{
 		stats.mean_energy = energy_sum / static_cast<double>(m_agents.size());
 		stats.mean_age /= static_cast<double>(m_agents.size());
+		stats.mean_autonomy /= static_cast<double>(m_agents.size());
 	}
 	return stats;
 }
@@ -562,7 +584,7 @@ void Simulation::write_telemetry()
 	*m_telemetry_output << stats.tick << ',' << stats.feeders << ',' << stats.predators << ','
 		<< stats.vegetables << ',' << stats.meat << ',' << stats.total_births << ','
 		<< stats.total_deaths << ',' << stats.total_vegetables_eaten << ','
-		<< stats.mean_energy << ',' << stats.mean_age;
+		<< stats.mean_energy << ',' << stats.mean_age << ',' << stats.mean_autonomy;
 	for(const std::size_t count : stats.state_counts) *m_telemetry_output << ',' << count;
 	for(std::size_t tier = static_cast<std::size_t>(BrainTier::SMALL); tier < BRAIN_TIER_COUNT; ++tier)
 		*m_telemetry_output << ',' << stats.brain_tier_counts[tier];

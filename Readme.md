@@ -10,7 +10,9 @@ The application uses `gtkmm-4.0` for the windowing and UI components, and a cust
 *   **Evolving Agents:** Agents' "brains" are neural networks that are passed down to offspring with slight mutations, allowing for evolution over time.
 *   **Dual-Brain Architecture:** Each agent has two distinct RNNs for decision-making:
     *   `ls3DRNN`: A custom RNN that controls 3D movement and orientation. Its hidden state is the agent's 4x4 transformation matrix.
-    *   `lsRNN`: A standard RNN that selects the agent's high-level behavioral state (e.g., `HUNT`, `FLEE`, `ROAM`).
+    *   `lsRNN`: A standard RNN that learns to select among `IDLE`, `ROAM`, `HUNT`, `FLEE`, `REST`, `GRAZE`, `EXPLORE`, and `INVESTIGATE`.
+*   **Propagating Food Patches:** Vegetation spreads locally from existing plants while new patches continue to appear elsewhere, creating feeding hotspots without scripting agent behavior. Cluster probability and radius are configurable; meat remains at death locations.
+*   **Teacher-to-Autonomous Behavior:** Agents begin with teacher guidance, then gradually choose their own states with bounded exploration. Teacher gradients fade, and offspring inherit mutated state policies and autonomy rather than starting with random state brains. Mean autonomy and new-state counts appear in the UI and CSV telemetry.
 *   **Standardized Brain Tiers:** Small, medium, and large dual-brain architectures support mixed populations, inheritance, and exact scalar/batched execution. Press **1/2/3** to choose the brain size for newly spawned agents.
 *   **Parallel Simulation:** A persistent CPU thread pool updates agents against an immutable start-of-tick world snapshot, with deterministic serial/parallel replay.
 *   **Vulkan + OpenGL Rendering:** Native Vulkan/Wayland is the default, with depth-tested world-cube edges, food, and interpolated instanced-agent pipelines. OpenGL remains available as an automatic or explicit fallback. Both consume the same immutable float snapshots.

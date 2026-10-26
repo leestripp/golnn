@@ -106,4 +106,18 @@ TEST_CASE(history_ring_supports_latest_step_after_wraparound)
 	for(const float value : rnn.forward_pass(input)) CHECK(std::isfinite(value));
 }
 
+TEST_CASE(state_brain_mutation_is_bounded_and_deterministic)
+{
+	lsRNN original(3, 5, 8, Task::CLASSIFICATION, 123);
+	lsRNN unchanged = original;
+	lsRNN mutated = original;
+	std::mt19937 rng(42);
+	unchanged.mutate(0.0f, 0.01f, rng);
+	CHECK(unchanged.checksum() == original.checksum());
+	mutated.mutate(1.0f, 0.001f, rng);
+	CHECK(mutated.checksum() != original.checksum());
+	const vector<float> output = mutated.forward_pass({0.25f, -0.5f, 1.0f});
+	for(const float value : output) CHECK(std::isfinite(value));
+}
+
 TEST_MAIN

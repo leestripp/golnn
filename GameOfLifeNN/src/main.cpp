@@ -417,6 +417,11 @@ bool Game::on_timer_tick()
 		" | Births " + std::to_string(stats.total_births) +
 		" | Deaths " + std::to_string(stats.total_deaths) +
 		" | Workers " + std::to_string(snapshot->worker_count) +
+		" | Autonomy " + std::to_string(static_cast<int>(stats.mean_autonomy * 100.0)) + "%" +
+		" | Rest " + std::to_string(stats.state_counts[4]) +
+		" Graze " + std::to_string(stats.state_counts[5]) +
+		" Explore " + std::to_string(stats.state_counts[6]) +
+		" Investigate " + std::to_string(stats.state_counts[7]) +
 		" | Next brain " + std::string(brain_tier_name(snapshot->selected_brain_tier)) +
 		" [S " + std::to_string(stats.brain_tier_counts[static_cast<std::size_t>(BrainTier::SMALL)]) +
 		" M " + std::to_string(stats.brain_tier_counts[static_cast<std::size_t>(BrainTier::MEDIUM)]) +

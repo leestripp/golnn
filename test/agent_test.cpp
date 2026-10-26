@@ -218,9 +218,9 @@ TEST_CASE(perception_encodes_food_distance_energy_and_state)
 
 TEST_CASE(perception_v2_tracks_goal_motion_and_compact_state_inputs)
 {
-	CHECK(perception::VERSION == 2);
-	CHECK(Agent::PERCEPTION_VECTOR_SIZE == 45);
-	CHECK(Agent::STATE_BRAIN_INPUT_DIM == 17);
+	CHECK(perception::VERSION == 3);
+	CHECK(Agent::PERCEPTION_VECTOR_SIZE == 50);
+	CHECK(Agent::STATE_BRAIN_INPUT_DIM == 18);
 	Simulation sim(0, 0, 100.0f);
 	sim.m_agents.push_back(make_agent(Agent::AgentType::FEEDER, glm::vec3(0.0f), 55.0f));
 	sim.m_food.push_back({FoodType::VEGETABLE, glm::vec3(0.0f, 0.0f, 5.0f)});
@@ -280,6 +280,64 @@ TEST_CASE(interaction_sounds_are_audible_for_exactly_the_following_tick)
 	CHECK(feeder.m_perception[perception::SOUND_INTENSITY] > 0.0f);
 	sim.tick();
 	CHECK(feeder.m_perception[perception::SOUND_INTENSITY] == 0.0f);
+}
+
+TEST_CASE(autonomy_ramp_waits_for_the_teacher_phase)
+{
+	SimulationConfig config;
+	config.state_teacher_ticks = 2;
+	config.state_autonomy_ramp_ticks = 10;
+	config.worker_count = 1;
+	Simulation sim(0, 0, 100.0f, config);
+	sim.m_agents.push_back(make_agent(Agent::AgentType::FEEDER, glm::vec3(0.0f), 100.0f));
+	sim.rebuild_spatial_grids();
+	Agent& agent = sim.m_agents[0];
+	agent.update(sim);
+	agent.update(sim);
+	CHECK(agent.m_autonomy == 0.0f);
+	agent.update(sim);
+	CHECK_NEAR(agent.m_autonomy, 0.1f, 1e-4f);
+	CHECK(agent.m_perception[perception::AUTONOMY] == agent.m_autonomy);
+	CHECK(agent.m_state_input_scratch[perception::STATE_AUTONOMY] == agent.m_autonomy);
+}
+
+TEST_CASE(network_exploration_can_select_all_new_states)
+{
+	SimulationConfig config;
+	config.state_teacher_ticks = 0;
+	config.state_autonomy_ramp_ticks = 1;
+	config.state_exploration_rate = 1.0f;
+	config.worker_count = 1;
+	Simulation sim(0, 0, 100.0f, config);
+	sim.m_agents.push_back(make_agent(Agent::AgentType::FEEDER, glm::vec3(0.0f), 100.0f));
+	sim.rebuild_spatial_grids();
+	Agent& agent = sim.m_agents[0];
+	agent.m_autonomy = 1.0f;
+	std::array<bool, 4> seen{};
+	bool rest_has_zero_translation = false;
+	for(int i = 0; i < 64; ++i)
+	{
+		agent.update(sim);
+		const auto state = static_cast<std::size_t>(agent.m_state);
+		if(state >= 4 && state < 8) seen[state - 4] = true;
+		if(agent.m_state == Agent::State::REST)
+		{
+			const auto& target = agent.movement_target();
+			rest_has_zero_translation = rest_has_zero_translation
+				|| (std::fabs(target[0]) < 1e-5f && std::fabs(target[1]) < 1e-5f
+					&& std::fabs(target[2]) < 1e-5f);
+		}
+	}
+	for(const bool state_seen : seen) CHECK(state_seen);
+	CHECK(rest_has_zero_translation);
+}
+
+TEST_CASE(reproduction_preserves_autonomy)
+{
+	Agent parent = make_agent(Agent::AgentType::FEEDER, glm::vec3(0.0f), 200.0f);
+	parent.m_autonomy = 0.7f;
+	const Agent child = parent.reproduce();
+	CHECK_NEAR(child.m_autonomy, 0.7f, 1e-5f);
 }
 
 TEST_MAIN

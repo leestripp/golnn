@@ -131,6 +131,17 @@ lsRNN::lsRNN(size_t in_dim, size_t hid_dim, size_t out_dim, Task task, std::uint
 }
 
 // Loss functions are now member functions
+void lsRNN::mutate(const float mutation_rate, const float mutation_amount, std::mt19937& rng)
+{
+	std::uniform_real_distribution<float> chance(0.0f, 1.0f);
+	std::uniform_real_distribution<float> delta(-mutation_amount, mutation_amount);
+	for(vector<float>* weights : {&W_xh, &W_hh, &W_ho, &b_h, &b_o})
+	{
+		for(float& weight : *weights)
+			if(chance(rng) < mutation_rate) weight += delta(rng);
+	}
+}
+
 float lsRNN::get_loss_cross_entropy(const vector<float>& predicted, const vector<float>& expected)
 {
 	float loss = 0.0f;

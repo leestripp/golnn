@@ -20,7 +20,8 @@ struct EcologyStats
 	std::size_t total_vegetables_eaten = 0;
 	double mean_energy = 0.0;
 	double mean_age = 0.0;
-	std::array<std::size_t, 4> state_counts{};
+	double mean_autonomy = 0.0;
+	std::array<std::size_t, 8> state_counts{};
 	std::array<std::size_t, BRAIN_TIER_COUNT> brain_tier_counts{};
 };
 

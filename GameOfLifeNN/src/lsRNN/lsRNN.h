@@ -50,6 +50,7 @@ public:
 	void train_step(const vector<float>& input, const vector<float>& expected_output);
 
 	void apply_and_clear_gradients(float learning_rate, size_t batch_size);
+	void mutate(float mutation_rate, float mutation_amount, std::mt19937& rng);
 
 	// Loss functions are now part of the class
 	float get_loss_cross_entropy(const vector<float>& predicted, const vector<float>& expected);

@@ -143,6 +143,11 @@ namespace
 		          << " births=" << stats.total_births
 		          << " deaths=" << stats.total_deaths
 		          << " vegetation_eaten=" << stats.total_vegetables_eaten
+		          << " autonomy=" << stats.mean_autonomy
+		          << " rest=" << stats.state_counts[4]
+		          << " graze=" << stats.state_counts[5]
+		          << " explore=" << stats.state_counts[6]
+		          << " investigate=" << stats.state_counts[7]
 		          << " checksum=0x" << std::hex << checksum << std::dec << '\n';
 		return ms_per_tick;
 	}
