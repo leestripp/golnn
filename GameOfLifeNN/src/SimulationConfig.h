@@ -29,6 +29,8 @@ struct SimulationConfig
 
 	BrainTier brain_tier = BrainTier::SMALL;
 	bool use_batched_brains = true;
+	// GUI builds publish immutable render snapshots; headless users can opt out.
+	bool publish_render_snapshots = true;
 
 	FoodRegrowthMode food_regrowth_mode = FoodRegrowthMode::ADAPTIVE;
 	float target_vegetation_per_feeder = 0.5f;

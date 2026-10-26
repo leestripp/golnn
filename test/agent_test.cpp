@@ -216,4 +216,70 @@ TEST_CASE(perception_encodes_food_distance_energy_and_state)
 	CHECK_NEAR(feeder.m_perception[30], 0.0f, 1e-6f);
 }
 
+TEST_CASE(perception_v2_tracks_goal_motion_and_compact_state_inputs)
+{
+	CHECK(perception::VERSION == 2);
+	CHECK(Agent::PERCEPTION_VECTOR_SIZE == 45);
+	CHECK(Agent::STATE_BRAIN_INPUT_DIM == 17);
+	Simulation sim(0, 0, 100.0f);
+	sim.m_agents.push_back(make_agent(Agent::AgentType::FEEDER, glm::vec3(0.0f), 55.0f));
+	sim.m_food.push_back({FoodType::VEGETABLE, glm::vec3(0.0f, 0.0f, 5.0f)});
+	sim.rebuild_spatial_grids();
+	Agent& feeder = sim.m_agents[0];
+	feeder.m_prev_transform = glm::translate(glm::mat4(1.0f), glm::vec3(-1.0f, 0.0f, 0.0f));
+	feeder.update(sim);
+
+	CHECK_NEAR(feeder.m_perception[perception::VELOCITY], 1.0f, 1e-5f);
+	CHECK_NEAR(feeder.m_perception[perception::HEADING + 2], 1.0f, 1e-5f);
+	CHECK_NEAR(feeder.m_perception[perception::GOAL_DIRECTION + 2], 1.0f, 1e-4f);
+	CHECK_NEAR(feeder.m_perception[perception::GOAL_ALIGNMENT], 1.0f, 1e-4f);
+	CHECK_NEAR(feeder.m_perception[perception::FOOD_DENSITY], 0.1f, 1e-5f);
+	CHECK(feeder.m_perception[perception::ENERGY_TREND] < 0.0f);
+	CHECK(feeder.m_state_input_scratch[perception::STATE_GOAL_ALIGNMENT]
+		== feeder.m_perception[perception::GOAL_ALIGNMENT]);
+	CHECK(feeder.m_state_input_scratch[perception::STATE_FOOD_DENSITY]
+		== feeder.m_perception[perception::FOOD_DENSITY]);
+}
+
+TEST_CASE(vision_has_a_rear_blind_spot_but_scent_is_omnidirectional)
+{
+	Simulation sim(0, 0, 100.0f);
+	sim.m_agents.push_back(make_agent(Agent::AgentType::FEEDER, glm::vec3(0.0f), 50.0f));
+	// Identity faces +z; this food is directly behind and outside close range.
+	sim.m_food.push_back({FoodType::VEGETABLE, glm::vec3(0.0f, 0.0f, -5.0f)});
+	sim.rebuild_spatial_grids();
+	Agent& feeder = sim.m_agents[0];
+	feeder.update(sim);
+	CHECK(feeder.m_perception[perception::FOOD_DISTANCE] == 0.0f);
+	CHECK_NEAR(feeder.m_perception[perception::SCENT_DIRECTION + 2], -1.0f, 1e-4f);
+	CHECK(feeder.m_perception[perception::SCENT_INTENSITY] > 0.0f);
+	CHECK(feeder.m_state == Agent::State::ROAM);
+}
+
+TEST_CASE(boundary_proximity_is_continuous_and_normalized)
+{
+	Simulation sim(0, 0, 100.0f);
+	sim.m_agents.push_back(make_agent(Agent::AgentType::FEEDER, glm::vec3(49.5f, 0.0f, 0.0f), 100.0f));
+	sim.rebuild_spatial_grids();
+	Agent& feeder = sim.m_agents[0];
+	feeder.update(sim);
+	CHECK_NEAR(feeder.m_perception[perception::BOUNDARY_PROXIMITY], 0.95f, 1e-4f);
+	CHECK(feeder.m_perception[perception::BOUNDARY_DIRECTION] < 0.0f);
+	CHECK(feeder.m_state_input_scratch[perception::STATE_BOUNDARY_PROXIMITY]
+		== feeder.m_perception[perception::BOUNDARY_PROXIMITY]);
+}
+
+TEST_CASE(interaction_sounds_are_audible_for_exactly_the_following_tick)
+{
+	Simulation sim(0, 0, 100.0f);
+	sim.m_agents.push_back(make_agent(Agent::AgentType::FEEDER, glm::vec3(0.0f), 100.0f));
+	sim.m_sound_events.push_back({glm::vec3(0.0f, 0.0f, 5.0f), 1.0f});
+	sim.tick();
+	Agent& feeder = sim.m_agents[0];
+	CHECK_NEAR(feeder.m_perception[perception::SOUND_DIRECTION + 2], 1.0f, 1e-4f);
+	CHECK(feeder.m_perception[perception::SOUND_INTENSITY] > 0.0f);
+	sim.tick();
+	CHECK(feeder.m_perception[perception::SOUND_INTENSITY] == 0.0f);
+}
+
 TEST_MAIN

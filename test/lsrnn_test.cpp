@@ -70,7 +70,7 @@ TEST_CASE(train_step_reduces_classification_loss)
 
 TEST_CASE(regression_train_step_reduces_mse)
 {
-	lsRNN rnn(3, 10, 2, Task::REGRESSION);
+	lsRNN rnn(3, 10, 2, Task::REGRESSION, 123);
 	const vector<float> input = {0.25f, -0.5f, 1.0f};
 	const vector<float> target = {0.8f, -0.3f};
 

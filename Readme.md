@@ -13,10 +13,13 @@ The application uses `gtkmm-4.0` for the windowing and UI components, and a cust
     *   `lsRNN`: A standard RNN that selects the agent's high-level behavioral state (e.g., `HUNT`, `FLEE`, `ROAM`).
 *   **Standardized Brain Tiers:** Small, medium, and large dual-brain architectures support mixed populations, inheritance, and exact scalar/batched execution. Press **1/2/3** to choose the brain size for newly spawned agents.
 *   **Parallel Simulation:** A persistent CPU thread pool updates agents against an immutable start-of-tick world snapshot, with deterministic serial/parallel replay.
+*   **Vulkan + OpenGL Rendering:** Native Vulkan/Wayland is the default, with depth-tested world-cube edges, food, and interpolated instanced-agent pipelines. OpenGL remains available as an automatic or explicit fallback. Both consume the same immutable float snapshots.
+*   **Decoupled Instanced Rendering:** Simulation and GTK run independently. Immutable float snapshots feed one instanced agent draw call, direct food buffers, and smooth previous/current transform interpolation without world-lock contention.
 *   **Adaptive Ecology:** Bounded vegetation regrowth responds to feeder population and consumption, with an emergency food floor and optional CSV telemetry. Live population and food statistics are shown in the GUI.
 *   **Diverse Agent Types & Ecosystem:**
     *   **Feeders:** Blue agents that seek out plant-based food and flee from predators.
     *   **Predators:** Yellow agents that hunt Feeders. If no Feeders are available, they will prey on each other.
+*   **Rich Versioned Senses:** A consolidated sensor pass supplies wide-field vision, omnidirectional scent/hearing, motion and heading, teacher-goal alignment, energy trends, food density, and boundary/threat proximity. The state brain receives a compact normalized subset.
 *   **Complex Sensory Inputs:** Agents perceive their environment through a variety of sensors, providing input to their brains:
     *   Direction and distance to food/prey/threats.
     *   A boundary avoidance vector to prevent getting stuck on walls.
@@ -87,6 +90,23 @@ Repeated samples print median timings and verify identical world checksums.
     ```bash
     ./GameOfLifeNN/golnn
     ```
+
+## Renderer Selection
+
+```bash
+# Native Vulkan/Wayland (default when available)
+./build/GameOfLifeNN/golnn
+
+# Force the existing OpenGL backend
+GOLNN_RENDERER=opengl ./build/GameOfLifeNN/golnn
+
+# Start with a larger population
+GOLNN_INITIAL_AGENTS=1000 ./build/GameOfLifeNN/golnn
+```
+
+Vulkan requires a native Wayland session; other environments fall back to OpenGL.
+Shader sources and generated SPIR-V are included. Only developers editing shaders need
+`glslang-tools` and `spirv-tools` to run `tools/compile_vulkan_shaders.sh`.
 
 ## Controls
 

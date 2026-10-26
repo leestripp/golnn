@@ -11,6 +11,7 @@
 
 #include "StateChecksum.h"
 #include "BrainCatalog.h"
+#include "Perception.h"
 
 // Forward declaration
 class Simulation;
@@ -57,23 +58,22 @@ public:
 	ls3DRNN m_brain;
 	glm::mat4 m_transform;
 	glm::mat4 m_prev_transform;
+	glm::vec3 m_velocity{0.0f}; // Last accepted world-space movement / MAX_SPEED
 	float m_energy;
 	int m_age;
 	State m_state;	 // The current state of the agent
 	glm::vec3 m_color; // Final color for visualization, adjusted for energy
 	AgentType m_type;  // The type of agent
  	
-	// The size of the perception vector fed into the movement brain (ls3DRNN).
-	// [0-11] Visual (Food, Threat, Friend), [12-19] Non-Visual (Scent, Sound)
-	// [20-22] Boundary, [23-24] Density, [25-26] Internal (Energy, Age)
-	// [27-30] State (one-hot)
-	static constexpr size_t PERCEPTION_VECTOR_SIZE = 31;
+	// Versioned layout is documented in Perception.h. v2 preserves v1 channels
+	// and appends motion, goal, energy-trend, density, and proximity signals.
+	static constexpr size_t PERCEPTION_VECTOR_SIZE = perception::COUNT;
 
 	// State Brain Parameters
 	static constexpr size_t NUM_ENERGY_BINS = 4;
 	static constexpr size_t NUM_DISTANCE_BINS = 4;		// For enemy distance
 	static constexpr size_t NUM_FOOD_DISTANCE_BINS = 4;   // For food distance
-	static constexpr size_t STATE_BRAIN_INPUT_DIM = NUM_ENERGY_BINS + NUM_DISTANCE_BINS + NUM_FOOD_DISTANCE_BINS;
+	static constexpr size_t STATE_BRAIN_INPUT_DIM = perception::STATE_INPUT_COUNT;
 	static constexpr size_t NUM_STATES = 4; // IDLE, ROAM, HUNT, FLEE
 	// State brain hidden layer size is now randomized on creation
 	static constexpr size_t MIN_STATE_NEURONS = 4;
@@ -84,7 +84,7 @@ public:
 
 private:
 	void update_state_transitions(const Simulation& world);
-	void prepare_brain_target(const std::vector<float>& perception_vector);
+	void prepare_brain_target(std::vector<float>& perception_vector);
 	void train_state_brain(const Simulation& world);
 	// Fills and returns the reused m_perception scratch buffer. update() writes
 	// the state one-hot indices [27-30] into it after calling this.
@@ -101,6 +101,8 @@ private:
 	
 	glm::vec3 m_base_color;	  // Base color determined by agent type
 	float m_energy_decay_rate; // Agent's specific energy decay per tick
+	float m_energy_trend = 0.0f; // Smoothed energy delta, normalized in perception
+	float m_previous_tick_energy = 0.0f;
 	float m_learning_rate;	 // Each agent has its own learning rate
 	std::mt19937 m_rng; // Per-agent stream: safe for parallel updates and reproduction
 	size_t m_state_brain_hidden_dim; // Number of neurons in the state brain's hidden layer
@@ -134,7 +136,9 @@ private:
 	
 	// New Sensor Parameters
 	static constexpr float BOUNDARY_THRESHOLD = 1.0f;
-	static constexpr float DENSITY_RADIUS_SQ = 1.0f; // 5 units squared
+	static constexpr float DENSITY_RADIUS_SQ = 1.0f;
+	static constexpr float FOOD_DENSITY_RADIUS_SQ = 100.0f;
+	static constexpr float BOUNDARY_AWARENESS_DISTANCE = 10.0f;
 };
 
 #endif // AGENT_H

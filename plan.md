@@ -67,8 +67,62 @@ near-term gains come from standardized shapes. SoA/SIMD remains optional future 
 All tiers completed healthy 3,000-tick ecology runs. Release, ASan, UBSan, and TSan
 suites pass, including exact scalar/batched replay tests.
 
-The existing OpenGL renderer is unchanged and still rebuilds nested `vector<double>`
-geometry on the CPU.
+### Native Vulkan renderer — completed
+
+Vulkan is now the default backend on native Wayland, with the existing instanced OpenGL
+renderer retained as a fallback and through `GOLNN_RENDERER=opengl`. GTK4 intentionally
+exposes no Vulkan internals, and its top-level surface already owns DRM-sync state, so
+presenting directly onto it fails. `WaylandSubsurface` instead creates an independent
+child surface for the scene area; GTK retains the controls/statistics and input.
+
+The backend includes depth-tested render passes, world-cube edges, food points,
+interpolated instanced agents, per-frame host-visible snapshot/uniform buffers, and
+swapchain recreation. GLSL sources and validated generated SPIR-V arrays are checked in;
+`tools/compile_vulkan_shaders.sh` regenerates them after edits without making shader
+tools a normal build dependency.
+
+Khronos validation reports no messages at 100 or 1,000 agents, including resize and
+normal GTK shutdown. All ten tests pass. A coarse 1,000-agent process comparison used
+about 110% total CPU for Vulkan versus 156% for OpenGL (simulation included); this is
+not a controlled FPS result. A stochastic RNN test was seeded, and OpenGL unrealize was
+fixed to use its live context directly. Remaining cleanup: a common abstract renderer
+interface and explicit FPS/GPU-time instrumentation if deeper comparison is needed.
+
+### Richer sensor system — completed
+
+Perception layout v2 (`Perception.h`) preserves channels 0-30 and appends normalized
+velocity, heading, teacher-goal direction/alignment, smoothed energy trend, local food
+density, continuous boundary proximity, and threat proximity. The state brain retains
+its original 12 bins plus five compact context inputs. Vision covers 300 degrees with
+close peripheral awareness; scent and hearing remain omnidirectional.
+
+Food vision/density/scent now share one grid visit, and predator prey vision/scent also
+share a visit. Goal channels are derived from the exact teacher target, including
+boundary avoidance. Interaction sounds now use a previous-tick audible buffer, fixing
+the old lifecycle where they were cleared before perception. Agent cleanup compacts
+in place and reuses offspring scratch rather than replacing the whole allocation.
+
+All three tiers completed healthy 3,000-tick ecology runs. The richer 45-channel input
+runs at roughly 4-4.3 ms/tick for 1,000 small-tier agents with 12 workers. New tests
+cover layout stability, goal alignment, velocity, rear-blind-spot vision versus scent,
+boundary proximity, and one-tick sound lifetime. Full sanitizer and GUI checks pass.
+
+### Decoupled instanced rendering — completed
+
+The simulation now runs on a dedicated `std::jthread` with bounded catch-up and clean
+GTK shutdown. Immutable `WorldSnapshot` objects carry float instance transforms,
+previous transforms, colors, ecology statistics, and UI settings. Two reusable slots
+avoid steady-state allocation; a held slot is never mutated. Headless benchmarks
+disable publication and remain at approximately **4.06 ms/tick** for 1,000 small-tier
+agents with 12 workers.
+
+The OpenGL backend now draws all agents in **one instanced draw call**, uploads food
+from direct float buffers, keeps static grid geometry, and interpolates current and
+previous transforms in the vertex shader. GTK no longer expands agents into nested
+`double` vertices or holds the world mutex. A concurrent-reader/immutability test was
+added; all ten tests pass in Release, ASan, UBSan, and TSan, and the instanced GUI
+smoke test succeeds on Wayland.
+
 
 ## Rules for Every Milestone
 
@@ -223,20 +277,20 @@ fixed and adaptive regimes over identical seed sets.
 
 Add useful information, not merely more input dimensions.
 
-- [ ] Preserve direction-vector teaching; never accidentally teach absolute positions.
-- [ ] Version the perception layout and document every channel, range, coordinate space,
+- [x] Preserve direction-vector teaching; never accidentally teach absolute positions.
+- [x] Version the perception layout and document every channel, range, coordinate space,
       and missing-target value. Add layout tests for feeder and predator perceptions.
-- [ ] Add normalized velocity/heading, target-relative heading, energy trend over a short
+- [x] Add normalized velocity/heading, target-relative heading, energy trend over a short
       window, local food density, and clearer boundary proximity. Reuse grid queries and
       scratch buffers.
-- [ ] Distinguish fields of view: directional vision versus wider scent/hearing. Consider
+- [x] Distinguish fields of view: directional vision versus wider scent/hearing. Consider
       nearest-K or multi-ray target summaries so one closest object does not hide the
       local crowd/food distribution.
-- [ ] Improve sound events with finite lifetime/intensity falloff if telemetry shows the
+- [x] Improve sound events with finite lifetime/intensity falloff if telemetry shows the
       current one-tick signal is rarely useful.
-- [ ] Feed a compact, normalized subset to the state brain; avoid overwhelming its small
+- [x] Feed a compact, normalized subset to the state brain; avoid overwhelming its small
       hidden state with redundant channels.
-- [ ] Evaluate sensory changes by behavior metrics and observation: fleeing earlier,
+- [x] Evaluate sensory changes by behavior metrics and observation: fleeing earlier,
       less wall sticking, better food acquisition, and non-degenerate state usage.
 
 **Acceptance:** perception unit tests and normalization checks pass; added sensors produce
@@ -264,15 +318,15 @@ seed sets; no universal state collapse; saved scenarios round-trip and replay co
 
 This is both an immediate GUI performance improvement and preparation for Vulkan.
 
-- [ ] Run the fixed-timestep simulation independently of GTK rendering, with bounded
+- [x] Run the fixed-timestep simulation independently of GTK rendering, with bounded
       catch-up and no uncontrolled spiral after a stall.
-- [ ] Publish double-buffered immutable render snapshots; remove the renderer's need to
+- [x] Publish double-buffered immutable render snapshots; remove the renderer's need to
       hold `m_data_mutex` throughout simulation work.
-- [ ] Replace nested `vector<double>` render data with compact float instance records
+- [x] Replace nested `vector<double>` render data with compact float instance records
       (transform, color, type). Avoid rebuilding every tetrahedron vertex on the CPU.
-- [ ] Interpolate `m_prev_transform` to the current transform for smooth rendering at a
+- [x] Interpolate `m_prev_transform` to the current transform for smooth rendering at a
       different rate from simulation ticks.
-- [ ] Use instanced agent rendering and persistent/static grid geometry in the existing
+- [x] Use instanced agent rendering and persistent/static grid geometry in the existing
       OpenGL backend. Keep food in an efficient point/instanced path.
 - [ ] Introduce a narrow renderer interface consuming the same render snapshot, with an
       OpenGL implementation retained as fallback/reference.
@@ -285,18 +339,18 @@ for Vulkan.
 
 Implement Vulkan only after M7 isolates rendering from simulation.
 
-- [ ] **Technical spike first:** choose the supported GTK4/native-window presentation
+- [x] **Technical spike first:** choose the supported GTK4/native-window presentation
       path on this Wayland machine. `Gtk::GLArea` is an OpenGL widget, so do not assume a
       Vulkan swapchain can simply be dropped into it. Prototype surface creation,
       resizing, and shutdown before migrating scene code.
-- [ ] Add CMake detection and an opt-in Vulkan backend. Keep OpenGL builds working when
+- [x] Add CMake detection and an opt-in Vulkan backend. Keep OpenGL builds working when
       the Vulkan SDK/driver is unavailable.
-- [ ] Implement instance/device/surface selection, queues, swapchain, depth buffer,
+- [x] Implement instance/device/surface selection, queues, swapchain, depth buffer,
       command pools/buffers, synchronization, and resize/out-of-date recovery with RAII.
-- [ ] Port the grid, instanced agents, and food using SPIR-V shaders and the shared float
+- [x] Port the grid, instanced agents, and food using SPIR-V shaders and the shared float
       instance snapshots. Use dynamic vertex/uniform/storage buffers as appropriate;
       avoid per-frame allocation and unnecessary readbacks.
-- [ ] Handle frames in flight correctly and ensure simulation snapshot publication never
+- [x] Handle frames in flight correctly and ensure simulation snapshot publication never
       waits on GPU readback.
 - [ ] Enable Vulkan validation layers in debug builds; test minimize, resize, unrealize,
       backend fallback, and clean shutdown on Wayland.

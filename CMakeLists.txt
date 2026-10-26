@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 
-project(myProject LANGUAGES CXX)
+project(myProject LANGUAGES C CXX)
 
 if(NOT CMAKE_BUILD_TYPE)
 	set(CMAKE_BUILD_TYPE Release)
@@ -92,3 +92,8 @@ add_executable(golnn_test_ecology test/ecology_test.cpp)
 target_link_libraries(golnn_test_ecology PRIVATE golnn_core golnn-warnings)
 target_include_directories(golnn_test_ecology PRIVATE test)
 add_test(NAME ecology COMMAND golnn_test_ecology)
+
+add_executable(golnn_test_render_snapshot test/render_snapshot_test.cpp)
+target_link_libraries(golnn_test_render_snapshot PRIVATE golnn_core golnn-warnings)
+target_include_directories(golnn_test_render_snapshot PRIVATE test)
+add_test(NAME render_snapshot COMMAND golnn_test_render_snapshot)

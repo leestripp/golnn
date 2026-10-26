@@ -36,6 +36,7 @@ Simulation::Simulation(size_t initial_agents, size_t initial_food, float world_s
 	// Initialize with a few agents and some food
 	spawn_initial_agents(initial_agents);
 	spawn_new_food(initial_food, 0.8f); // This will spawn VEGETABLE food by default
+	publish_render_snapshot();
 }
 
 
@@ -43,6 +44,10 @@ void Simulation::tick() {
 	// Lock the data to prevent race conditions with rendering thread
 	std::lock_guard<std::mutex> lock(m_data_mutex);
 
+	// Interaction sounds survive until the following perception pass instead
+	// of being cleared before any agent can hear them.
+	m_audible_sound_events.swap(m_sound_events);
+	m_sound_events.clear();
 	update_food_regrowth();
 	
 	// Rebuild the spatial indices for this tick (O(n)). All proximity queries
@@ -70,9 +75,9 @@ void Simulation::tick() {
 	// 3. Handle death and reproduction
 	cleanup_dead_agents_and_spawn_offspring();
 
-	// 4. Clear transient world data and publish ecology telemetry.
-	m_sound_events.clear();
+	// 4. Publish ecology telemetry and the latest immutable render snapshot.
 	++m_tick_count;
+	publish_render_snapshot();
 	write_telemetry();
 }
 
@@ -273,48 +278,40 @@ void Simulation::cleanup_dead_agents_and_spawn_offspring()
 		m_food.clear();
 	}
 	
-	std::vector<Agent> surviving_agents;
-	surviving_agents.reserve(m_agents.size()); // Optimization: avoid reallocations for survivors
-	std::vector<Agent> new_agents;
-	
-	for(auto& agent : m_agents)
+	m_offspring_scratch.clear();
+	std::size_t survivor_count = 0;
+	for(std::size_t read_index = 0; read_index < m_agents.size(); ++read_index)
 	{
+		Agent& agent = m_agents[read_index];
 		if(agent.isDead())
 		{
 			++m_total_deaths;
-			// When a feeder dies, it leaves meat behind for predators.
 			if(m_food.size() < m_config.max_food && agent.m_type == Agent::AgentType::FEEDER)
 			{
 				glm::vec3 food_pos = glm::vec3(agent.m_transform[3]);
-				float half_world_size = m_world_size / 2.0f;
-
-				// Ensure the food spawns within the world boundaries.
+				const float half_world_size = m_world_size / 2.0f;
 				food_pos.x = std::clamp(food_pos.x, -half_world_size, half_world_size);
 				food_pos.y = std::clamp(food_pos.y, -half_world_size, half_world_size);
 				food_pos.z = std::clamp(food_pos.z, -half_world_size, half_world_size);
-				
 				m_food.push_back({FoodType::MEAT, food_pos});
 			}
-		} else // Agent is alive
-		{
-			// Check if the agent can reproduce AND if there is room for offspring.
-			// This check is crucial to prevent the population from exploding and crashing.
-			if(agent.canReproduce() && (m_agents.size() + new_agents.size() < m_config.max_agents))
-			{
-				new_agents.push_back(agent.reproduce());
-			}
-			// The parent always survives this tick.
-			surviving_agents.push_back(std::move(agent));
+			continue;
 		}
+
+		if(agent.canReproduce() && (m_agents.size() + m_offspring_scratch.size() < m_config.max_agents))
+			m_offspring_scratch.push_back(agent.reproduce());
+		// Compact in place. Reserved capacity is retained even when no agent
+		// dies, avoiding a full vector replacement and needless pointer churn.
+		if(survivor_count != read_index) m_agents[survivor_count] = std::move(agent);
+		++survivor_count;
 	}
-	
-	// Replace the old agent list with the surviving agents
-	m_agents = std::move(surviving_agents);
-	m_total_births += new_agents.size();
-	// Add the new offspring to the list
-	if(! new_agents.empty())
+	m_agents.erase(m_agents.begin() + static_cast<std::ptrdiff_t>(survivor_count), m_agents.end());
+	m_total_births += m_offspring_scratch.size();
+	if(!m_offspring_scratch.empty())
 	{
-		m_agents.insert(m_agents.end(), std::make_move_iterator(new_agents.begin()), std::make_move_iterator(new_agents.end()));
+		m_agents.insert(m_agents.end(),
+			std::make_move_iterator(m_offspring_scratch.begin()),
+			std::make_move_iterator(m_offspring_scratch.end()));
 	}
 }
 
@@ -523,6 +520,39 @@ EcologyStats Simulation::ecology_stats() const
 	return stats;
 }
 
+void Simulation::publish_render_snapshot()
+{
+	if(!m_config.publish_render_snapshots) return;
+	const std::size_t slot_index = (m_render_write_index + 1) % m_render_snapshot_storage.size();
+	std::shared_ptr<WorldSnapshot>& slot = m_render_snapshot_storage[slot_index];
+	if(slot.use_count() != 1) slot = std::make_shared<WorldSnapshot>();
+	WorldSnapshot& snapshot = *slot;
+	snapshot.tick = m_tick_count;
+	snapshot.selected_brain_tier = m_config.brain_tier;
+	snapshot.worker_count = worker_count();
+	snapshot.publication_time_seconds = std::chrono::duration<double>(
+		std::chrono::steady_clock::now().time_since_epoch()).count();
+	snapshot.stats = ecology_stats();
+	snapshot.agents.clear();
+	snapshot.food.clear();
+	snapshot.agents.reserve(m_agents.size());
+	snapshot.food.reserve(m_food.size());
+	for(const Agent& agent : m_agents)
+	{
+		snapshot.agents.push_back({agent.m_transform, agent.m_prev_transform,
+			glm::vec4(agent.m_color, 1.0f)});
+	}
+	for(const Food& food : m_food)
+	{
+		const glm::vec3 color = food.m_food_type == FoodType::MEAT
+			? glm::vec3(0.8f, 0.2f, 0.2f) : glm::vec3(0.2f, 0.8f, 0.2f);
+		snapshot.food.push_back({food.position, color});
+	}
+	m_render_write_index = slot_index;
+	std::shared_ptr<const WorldSnapshot> published = slot;
+	m_render_snapshot.store(std::move(published));
+}
+
 void Simulation::write_telemetry()
 {
 	if(!m_telemetry_output) return;
@@ -573,6 +603,17 @@ state_checksum::type Simulation::state_checksum() const
 		::state_checksum::add(hash, food.position.x);
 		::state_checksum::add(hash, food.position.y);
 		::state_checksum::add(hash, food.position.z);
+	}
+	for(const auto* sounds : {&m_sound_events, &m_audible_sound_events})
+	{
+		::state_checksum::add(hash, sounds->size());
+		for(const SoundEvent& sound : *sounds)
+		{
+			::state_checksum::add(hash, sound.position.x);
+			::state_checksum::add(hash, sound.position.y);
+			::state_checksum::add(hash, sound.position.z);
+			::state_checksum::add(hash, sound.intensity);
+		}
 	}
 	::state_checksum::add(hash, m_food_spawn_timer);
 	::state_checksum::add(hash, m_tick_count);

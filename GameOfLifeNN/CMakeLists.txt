@@ -29,12 +29,23 @@ pkg_check_modules(SIGC sigc++-3.0)
 find_package(GLEW QUIET)
 find_package(OpenGL QUIET)
 find_package(OpenAL QUIET) # unused today, kept for future audio
+find_package(Vulkan QUIET)
+pkg_check_modules(WAYLAND_CLIENT wayland-client)
 
 if(GTKMM_FOUND AND SIGC_FOUND AND GLEW_FOUND AND OpenGL_FOUND)
 	add_executable(golnn
 		src/main.cpp
 		src/ls3DGraph/ls3DGraph.cpp
 	)
+	if(Vulkan_FOUND AND WAYLAND_CLIENT_FOUND)
+		target_sources(golnn PRIVATE
+			src/Vulkan/VulkanRenderer.cpp
+			src/Vulkan/WaylandSubsurface.cpp
+		src/Vulkan/viewporter-protocol.c
+		)
+		target_compile_definitions(golnn PRIVATE GOLNN_HAS_VULKAN=1 VK_USE_PLATFORM_WAYLAND_KHR)
+		target_link_libraries(golnn PRIVATE Vulkan::Vulkan ${WAYLAND_CLIENT_LIBRARIES})
+	endif()
 	# Project uses no GLU; stop glew.h from requiring the GLU headers
 	target_compile_definitions(golnn PRIVATE GLEW_NO_GLU)
 	target_include_directories(golnn PRIVATE

@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <mutex>
 #include <memory>
+#include <atomic>
 #include <array>
 #include <iosfwd>
 #include <random>
@@ -12,24 +13,9 @@
 #include "SimulationConfig.h"
 #include "StateChecksum.h"
 #include "Agent.h"
+#include "RenderSnapshot.h"
 
 class ThreadPool;
-
-struct EcologyStats
-{
-	std::size_t tick = 0;
-	std::size_t feeders = 0;
-	std::size_t predators = 0;
-	std::size_t vegetables = 0;
-	std::size_t meat = 0;
-	std::size_t total_births = 0;
-	std::size_t total_deaths = 0;
-	std::size_t total_vegetables_eaten = 0;
-	double mean_energy = 0.0;
-	double mean_age = 0.0;
-	std::array<std::size_t, Agent::NUM_STATES> state_counts{};
-	std::array<std::size_t, BRAIN_TIER_COUNT> brain_tier_counts{};
-};
 
 #include "SpatialGrid.h"
 
@@ -69,7 +55,8 @@ public:
     // Agents and food are public so the main loop can access them for rendering
     std::vector<Agent> m_agents;
     std::vector<Food> m_food;
-    std::vector<SoundEvent> m_sound_events; // Holds sound events for the current tick
+    std::vector<SoundEvent> m_sound_events; // New events from this tick's interactions
+    std::vector<SoundEvent> m_audible_sound_events; // Previous tick, sensed now
     const float m_world_size;
     std::mutex m_data_mutex; // Mutex to protect agent/food vectors during access
 
@@ -88,6 +75,10 @@ public:
 	const SimulationConfig& get_config() const { return m_config; }
 	std::size_t worker_count() const;
 	EcologyStats ecology_stats() const;
+	std::shared_ptr<const WorldSnapshot> render_snapshot() const
+	{
+		return m_render_snapshot.load();
+	}
 	void set_brain_tier(BrainTier tier);
 	const glm::mat4& sensed_agent_transform(std::size_t index) const
 	{
@@ -99,6 +90,7 @@ private:
 	void update_food_regrowth();
 	void train_movement_brains();
 	void write_telemetry();
+	void publish_render_snapshot();
 	void rebuild_agent_grids();
 	void rebuild_food_grids();
     void handle_agent_interactions();
@@ -135,6 +127,7 @@ private:
 		std::vector<const std::vector<float>*> targets;
 	};
 	std::array<MovementBatch, BRAIN_TIER_COUNT> m_movement_batches;
+	std::vector<Agent> m_offspring_scratch;
 
 	std::size_t m_tick_count = 0;
 	std::size_t m_total_births = 0;
@@ -142,6 +135,13 @@ private:
 	std::size_t m_total_vegetables_eaten = 0;
 	std::size_t m_vegetables_eaten_since_balance = 0;
 	std::unique_ptr<std::ofstream> m_telemetry_output;
+
+	// Two reusable slots avoid steady-state render allocation. If a renderer
+	// still holds the next slot, allocate a replacement instead of mutating it.
+	std::array<std::shared_ptr<WorldSnapshot>, 2> m_render_snapshot_storage{
+		std::make_shared<WorldSnapshot>(), std::make_shared<WorldSnapshot>()};
+	std::size_t m_render_write_index = 0;
+	std::atomic<std::shared_ptr<const WorldSnapshot>> m_render_snapshot;
 };
 
 #endif // SIMULATION_H

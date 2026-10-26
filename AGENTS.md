@@ -92,7 +92,8 @@ cmake --build --target cppcheck
 - `golnn_smoke_test` — CTest-registered smoke test (repo-root `test/smoke_test.cpp`).
 - `golnn_test_spatial_grid`, `golnn_test_lsrnn`, `golnn_test_ls3drnn`,
   `golnn_test_lsvec_tokenizer`, `golnn_test_agent`, `golnn_test_determinism`,
-  `golnn_test_thread_pool`, `golnn_test_ecology` — unit tests (repo-root `test/`), each a separate
+  `golnn_test_thread_pool`, `golnn_test_ecology`, `golnn_test_render_snapshot` —
+  unit tests (repo-root `test/`), each a separate
   CTest entry. They use the framework-free harness in `test/test_framework.h`
   (`TEST_CASE`/`CHECK`/`CHECK_NEAR`/`TEST_MAIN`); add new component tests the
   same way and register them with `add_test`.
@@ -151,23 +152,36 @@ Runtime controls: `WASD` camera, `Shift` sprint, mouse-drag look, `E` spawn 20 a
 
 ## Conventions & Gotchas for Agents
 
+- Perception layout v2 lives in `Perception.h`: channels 0-30 are legacy-compatible,
+  31-44 add motion/goal/context. Use named indices, not new magic numbers. Vision is
+  300 degrees; scent/hearing are omnidirectional. Share spatial-grid visits for
+  related senses. `m_sound_events` holds new interaction events and
+  `m_audible_sound_events` holds the previous tick for perception; do not clear the
+  audible buffer before agents sense it.
 - Teacher forcing and reproduction/mutation logic are the simulation's core —
   the rules (eating order, detection distances, direction-vs-position teaching,
   population caps) are documented in the code comments and Readme.md; read them
   before modifying that logic.
 - Guard population explosions: check `m_config.max_agents` before spawning/reproducing.
+  Cleanup compacts agents in place within reserved capacity and reuses offspring
+  scratch; do not replace the whole vector each tick. External Agent references are
+  still only valid until a compaction/spawn phase changes indexing.
 - Any position dropped into the world (e.g. `MEAT` food) must be clamped inside world
   bounds — agents can die outside them.
-- The simulation runs on a GLib timeout in the GTK main loop; keep per-tick work
-  cheap. Agent updates run in a persistent thread pool (default hardware concurrency),
-  while interactions/reproduction stay serial. `worker_count = 1` is the serial fallback.
+- The simulation runs on a dedicated `std::jthread` (33 ms fixed timestep, bounded
+  catch-up); GTK renders independently. Agent updates also use a persistent thread
+  pool (default hardware concurrency), while interactions/reproduction stay serial.
+  `worker_count = 1` is the serial fallback. The simulation thread must be joined
+  before the Simulation or GTK objects are destroyed.
 - Hot-path rules (post-M1/M2, see plan.md): all NN math is `float` in flat
   contiguous arrays; `perceive()`/`train_state_brain()`/NN forward passes reuse
   member scratch buffers (no per-tick heap allocations); `Simulation` rebuilds
   its type-partitioned `SpatialGrid`s and all proximity queries
   go through them (never linear scans of `m_agents`/`m_food`). Perception reads
   other agents from the immutable start-of-tick transform snapshot, never live
-  transforms being mutated by workers. If you add a new
+  transforms being mutated by workers. GUI reads use atomic immutable
+  `WorldSnapshot`s, never direct agent/food access or the world mutex. Headless
+  benchmarks set `publish_render_snapshots = false`. If you add a new
   proximity query, add it to the grids — don't reintroduce an O(n) scan.
 - `ls3DRNN::forward()` is memoized (movement training is followed by process_step
   with the same input). Any change that mutates weights must invalidate the cache —
@@ -175,6 +189,22 @@ Runtime controls: `WASD` camera, `Shift` sprint, mouse-drag look, `E` spawn 20 a
   Agent update into prepare/train/finish phases and calls `train_batch()` only on
   matching catalog tiers; `BrainTier::CUSTOM` always uses the scalar path. Scalar and
   batched execution must remain checksum-equivalent.
+- The world boundary is 12 cube edges (24 line vertices), not a central floor grid;
+  keep this geometry shared between OpenGL and Vulkan via `m_grid_data`.
+- Rendering uses one instanced draw for agents, direct float food buffers, and
+  shader-side previous/current transform interpolation. Keep renderer inputs limited
+  to `RenderSnapshot.h`; both OpenGL and Vulkan consume this shared boundary.
+- Vulkan is the default on Wayland. `GOLNN_RENDERER=opengl` forces the fallback.
+  `GOLNN_INITIAL_AGENTS=1000` sets a larger initial population. Never present Vulkan
+  directly on GTK's top-level surface (GTK already owns its DRM-sync object); use
+  `WaylandSubsurface` for the scene area and let GTK own the controls/input.
+  Position the child with `compute_point()` plus `get_surface_transform()` (titlebar
+  and native borders), and set its `wp_viewport` destination to the GTK allocation;
+  buffer pixels and GTK logical units differ under fractional scaling (e.g. 1.25).
+- Vulkan GLSL is in `GameOfLifeNN/shaders`; generated `.spv.inc` arrays are checked in.
+  After shader edits run `tools/compile_vulkan_shaders.sh` (requires glslang-tools and
+  spirv-tools). Normal builds need no shader compiler. Validation smoke:
+  `VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation GOLNN_INITIAL_AGENTS=1000 GOLNN_TEST_RESIZE_MS=2000 GOLNN_AUTO_CLOSE_MS=7000 ./build/GameOfLifeNN/golnn`.
 - **Wayland + GLEW gotcha**: under Wayland, GTK4's GLArea hands GLEW an EGL
   context, so `glewInit()` returns `GLEW_ERROR_NO_GLX_DISPLAY` (4). GLEW loads
   all *core* GL function pointers before that GLX probe fails, so the error is

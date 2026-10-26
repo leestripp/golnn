@@ -116,6 +116,7 @@ namespace
 		config.worker_count = options.workers;
 		config.brain_tier = options.brain_tier;
 		config.use_batched_brains = options.use_batched_brains;
+		config.publish_render_snapshots = false;
 		config.food_regrowth_mode = options.fixed_food ? FoodRegrowthMode::FIXED : FoodRegrowthMode::ADAPTIVE;
 		config.telemetry_path = options.telemetry_path;
 		Simulation sim(options.agents, options.food, options.world, config);

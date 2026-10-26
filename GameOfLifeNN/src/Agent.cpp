@@ -84,6 +84,7 @@ Agent::Agent(ls3DRNN brain, const glm::mat4& initial_transform, AgentType type, 
 			m_energy = INITIAL_ENERGY;
 		}
 	}
+	m_previous_tick_energy = m_energy;
 	
 	// Synchronize the brain's internal state with the agent's initial transform.
 	m_brain.set_state(m_transform);
@@ -112,20 +113,22 @@ void Agent::update(const Simulation& world)
 bool Agent::prepare_update(const Simulation& world)
 {
 	m_movement_pending = false;
+	m_velocity = (glm::vec3(m_transform[3]) - glm::vec3(m_prev_transform[3])) / MAX_SPEED;
 	m_age++;
 	m_energy -= m_energy_decay_rate;
+	m_energy_trend = 0.95f * m_energy_trend + 0.05f * (m_energy - m_previous_tick_energy);
+	m_previous_tick_energy = m_energy;
 	if(isDead()) return false;
 
 	m_prev_transform = m_transform;
 	std::vector<float>& perception_vector = perceive(world);
 	update_state_transitions(world);
-	train_state_brain(world);
 
-	perception_vector[27] = (m_state == State::IDLE) ? 1.0f : 0.0f;
-	perception_vector[28] = (m_state == State::ROAM) ? 1.0f : 0.0f;
-	perception_vector[29] = (m_state == State::HUNT) ? 1.0f : 0.0f;
-	perception_vector[30] = (m_state == State::FLEE) ? 1.0f : 0.0f;
+	std::fill(perception_vector.begin() + perception::STATE_ONE_HOT,
+		perception_vector.begin() + perception::STATE_ONE_HOT + NUM_STATES, 0.0f);
+	perception_vector[perception::STATE_ONE_HOT + static_cast<std::size_t>(m_state)] = 1.0f;
 	prepare_brain_target(perception_vector);
+	train_state_brain(world);
 	m_movement_pending = true;
 	return true;
 }
@@ -167,27 +170,28 @@ void Agent::finish_update(const Simulation& world)
 constexpr float MAX_SOUND_RADIUS_SQ = 900.0f; // 30 units
 constexpr float MAX_SCENT_RADIUS_SQ = 900.0f; // 30 units
 
-// Gathers sensory information, prepares the input vector for the movement RNN,
-// and updates the agent's internal world model (m_food_pos, m_threat_pos, etc.).
+// Gathers sensory information in a small number of spatial-grid visits. Vision
+// covers a wide 300-degree field; scent and hearing remain omnidirectional.
 std::vector<float>& Agent::perceive(const Simulation& world)
 {
-	// Reset internal world model
 	m_food_pos = glm::vec3(0.0f);
 	m_follow_agent_pos = glm::vec3(0.0f);
 	m_threat_pos = glm::vec3(0.0f);
+	auto& values = m_perception;
+	std::fill(values.begin(), values.end(), 0.0f);
 
-	// The vector now has space for all new sensors. The state will be added in update().
-	// See Agent.h for PERCEPTION_VECTOR_SIZE definition (31)
-	std::vector<float>& perception = m_perception;
-	std::fill(perception.begin(), perception.end(), 0.0f);
-
-	glm::vec3 agent_pos = m_transform[3];
-	
-	// Dynamic detection radius for VISUAL sensors
+	const glm::vec3 agent_pos = m_transform[3];
+	const glm::vec3 agent_fwd = glm::normalize(glm::vec3(m_transform[2]));
 	const float detection_radius = world.m_world_size * 0.5f;
 	const float detection_radius_sq = detection_radius * detection_radius;
+	constexpr float fov_cosine_squared = 0.75f; // rear 60 degrees are blind
+	const auto is_visible = [&](const glm::vec3& offset, const float distance_sq) {
+		if(distance_sq < 1.0f) return true; // close peripheral awareness
+		const float forward_dot = glm::dot(agent_fwd, offset);
+		if(forward_dot >= 0.0f) return true;
+		return forward_dot * forward_dot <= fov_cosine_squared * distance_sq;
+	};
 
-	// --- SENSOR: Visual Targets ---
 	glm::vec3 closest_food_pos(0.0f);
 	glm::vec3 closest_follow_pos(0.0f);
 	glm::vec3 closest_threat_pos(0.0f);
@@ -197,296 +201,258 @@ std::vector<float>& Agent::perceive(const Simulation& world)
 	bool found_threat = false;
 	bool found_follow = false;
 	bool found_food = false;
+	float friendly_agent_count = 0.0f;
+	float hostile_agent_count = 0.0f;
+	float food_density_count = 0.0f;
+	glm::vec3 strongest_scent_dir(0.0f);
+	float max_scent_intensity = 0.0f;
 
-	// Predator-specific prey tracking
-	glm::vec3 closest_feeder_prey_pos(0.0f);
-	glm::vec3 closest_predator_prey_pos(0.0f);
-	float min_feeder_prey_dist_sq = std::numeric_limits<float>::max();
-	float min_predator_prey_dist_sq = std::numeric_limits<float>::max();
-	bool found_feeder_prey = false;
-	bool found_predator_prey = false;
-
-	// Find closest food via the target type's own spatial grid: feeders track
-	// vegetables, predators track meat, and each grid holds only that type.
+	// One food visit gathers the nearest visible target, local density, and the
+	// strongest scent instead of scanning the same cells again for each sense.
 	const SpatialGrid& target_food_grid =
 		(m_type == AgentType::FEEDER) ? world.m_vegetable_grid : world.m_meat_grid;
-	target_food_grid.visit(agent_pos, detection_radius, [&](size_t i) {
+	target_food_grid.visit(agent_pos, detection_radius, [&](const std::size_t i) {
 		const Food& food = world.m_food[i];
-		float dist_sq = glm::distance2(agent_pos, food.position);
-		if (dist_sq < detection_radius_sq && dist_sq < min_food_dist_sq) {
+		const glm::vec3 offset = food.position - agent_pos;
+		const float dist_sq = glm::length2(offset);
+		if(dist_sq < FOOD_DENSITY_RADIUS_SQ) ++food_density_count;
+		if(dist_sq < MAX_SCENT_RADIUS_SQ)
+		{
+			const float intensity = 1.0f / (dist_sq + 1.0f);
+			if(intensity > max_scent_intensity)
+			{
+				max_scent_intensity = intensity;
+				strongest_scent_dir = offset;
+			}
+		}
+		if(dist_sq < detection_radius_sq && dist_sq < min_food_dist_sq && is_visible(offset, dist_sq))
+		{
 			min_food_dist_sq = dist_sq;
 			closest_food_pos = food.position;
 			found_food = true;
 		}
 	});
 
-	// --- SENSOR: Local Agent Density & Visual Agent Tracking ---
-	// Each sensor visits only the grid holding the types it can detect, so a
-	// feeder's threat scan touches the (small) predator grid instead of every
-	// agent in the world.
-	float friendly_agent_count = 0.0f;
-	float hostile_agent_count = 0.0f;
-
-	if (m_type == AgentType::FEEDER) {
-		// Threats: closest predator within visual range (also counts local
-		// hostile density — same visit, extra comparison).
-		world.m_predator_grid.visit(agent_pos, detection_radius, [&](size_t i) {
-			glm::vec3 other_pos = world.sensed_agent_transform(i)[3];
-			float dist_sq = glm::distance2(agent_pos, other_pos);
-			if (dist_sq < DENSITY_RADIUS_SQ) hostile_agent_count++;
-			if (dist_sq < detection_radius_sq && dist_sq < min_threat_dist_sq) {
+	if(m_type == AgentType::FEEDER)
+	{
+		world.m_predator_grid.visit(agent_pos, detection_radius, [&](const std::size_t i) {
+			const glm::vec3 other_pos = world.sensed_agent_transform(i)[3];
+			const glm::vec3 offset = other_pos - agent_pos;
+			const float dist_sq = glm::length2(offset);
+			if(dist_sq < DENSITY_RADIUS_SQ) ++hostile_agent_count;
+			if(dist_sq < detection_radius_sq && dist_sq < min_threat_dist_sq && is_visible(offset, dist_sq))
+			{
 				min_threat_dist_sq = dist_sq;
 				closest_threat_pos = other_pos;
 				found_threat = true;
 			}
 		});
-		// Friends: closest feeder within follow range (ROAM_FOLLOW_RADIUS_SQ).
-		world.m_feeder_grid.visit(agent_pos, sqrt(ROAM_FOLLOW_RADIUS_SQ), [&](size_t i) {
+		world.m_feeder_grid.visit(agent_pos, std::sqrt(ROAM_FOLLOW_RADIUS_SQ), [&](const std::size_t i) {
 			const Agent& other = world.m_agents[i];
-			if (&other == this) return;
-			glm::vec3 other_pos = world.sensed_agent_transform(i)[3];
-			float dist_sq = glm::distance2(agent_pos, other_pos);
-			if (dist_sq < DENSITY_RADIUS_SQ) friendly_agent_count++;
-			if (dist_sq < min_follow_dist_sq) {
+			if(&other == this) return;
+			const glm::vec3 other_pos = world.sensed_agent_transform(i)[3];
+			const glm::vec3 offset = other_pos - agent_pos;
+			const float dist_sq = glm::length2(offset);
+			if(dist_sq < DENSITY_RADIUS_SQ) ++friendly_agent_count;
+			if(dist_sq < min_follow_dist_sq && is_visible(offset, dist_sq))
+			{
 				min_follow_dist_sq = dist_sq;
 				closest_follow_pos = other_pos;
 				found_follow = true;
 			}
 		});
-	} else { // PREDATOR
-		// Prey: closest feeder within visual range.
-		world.m_feeder_grid.visit(agent_pos, detection_radius, [&](size_t i) {
-			glm::vec3 other_pos = world.sensed_agent_transform(i)[3];
-			float dist_sq = glm::distance2(agent_pos, other_pos);
-			if (dist_sq < detection_radius_sq && dist_sq < min_feeder_prey_dist_sq) {
+	}
+	else
+	{
+		glm::vec3 closest_feeder_prey_pos(0.0f);
+		glm::vec3 closest_predator_prey_pos(0.0f);
+		float min_feeder_prey_dist_sq = std::numeric_limits<float>::max();
+		float min_predator_prey_dist_sq = std::numeric_limits<float>::max();
+		bool found_feeder_prey = false;
+		bool found_predator_prey = false;
+
+		// Prey vision and prey scent share one feeder-grid visit.
+		world.m_feeder_grid.visit(agent_pos, detection_radius, [&](const std::size_t i) {
+			const Agent& other = world.m_agents[i];
+			if(&other == this) return;
+			const glm::vec3 other_pos = world.sensed_agent_transform(i)[3];
+			const glm::vec3 offset = other_pos - agent_pos;
+			const float dist_sq = glm::length2(offset);
+			if(dist_sq < MAX_SCENT_RADIUS_SQ)
+			{
+				const float intensity = 1.5f / (dist_sq + 1.0f);
+				if(intensity > max_scent_intensity)
+				{
+					max_scent_intensity = intensity;
+					strongest_scent_dir = offset;
+				}
+			}
+			if(dist_sq < detection_radius_sq && dist_sq < min_feeder_prey_dist_sq && is_visible(offset, dist_sq))
+			{
 				min_feeder_prey_dist_sq = dist_sq;
 				closest_feeder_prey_pos = other_pos;
 				found_feeder_prey = true;
 			}
 		});
-		// Rivals: closest other predator within visual range (also hostile density).
-		world.m_predator_grid.visit(agent_pos, detection_radius, [&](size_t i) {
+		world.m_predator_grid.visit(agent_pos, detection_radius, [&](const std::size_t i) {
 			const Agent& other = world.m_agents[i];
-			if (&other == this) return;
-			glm::vec3 other_pos = world.sensed_agent_transform(i)[3];
-			float dist_sq = glm::distance2(agent_pos, other_pos);
-			if (dist_sq < DENSITY_RADIUS_SQ) hostile_agent_count++;
-			if (dist_sq < detection_radius_sq && dist_sq < min_predator_prey_dist_sq) {
+			if(&other == this) return;
+			const glm::vec3 other_pos = world.sensed_agent_transform(i)[3];
+			const glm::vec3 offset = other_pos - agent_pos;
+			const float dist_sq = glm::length2(offset);
+			if(dist_sq < DENSITY_RADIUS_SQ) ++hostile_agent_count;
+			if(dist_sq < detection_radius_sq && dist_sq < min_predator_prey_dist_sq && is_visible(offset, dist_sq))
+			{
 				min_predator_prey_dist_sq = dist_sq;
 				closest_predator_prey_pos = other_pos;
 				found_predator_prey = true;
 			}
 		});
-	}
-	
-	// Predator prey selection logic
-	if (m_type == AgentType::PREDATOR) {
-		if (found_feeder_prey) {
+
+		if(found_feeder_prey)
+		{
 			closest_threat_pos = closest_feeder_prey_pos;
 			min_threat_dist_sq = min_feeder_prey_dist_sq;
 			found_threat = true;
-		} else if (found_predator_prey) {
+		}
+		else if(found_predator_prey)
+		{
 			closest_threat_pos = closest_predator_prey_pos;
 			min_threat_dist_sq = min_predator_prey_dist_sq;
 			found_threat = true;
 		}
 	}
 
-	// --- Update Internal World Model ---
-	if (found_food) m_food_pos = closest_food_pos;
-	if (found_follow) m_follow_agent_pos = closest_follow_pos;
-	if (found_threat) m_threat_pos = closest_threat_pos;
+	if(found_food) m_food_pos = closest_food_pos;
+	if(found_follow) m_follow_agent_pos = closest_follow_pos;
+	if(found_threat) m_threat_pos = closest_threat_pos;
 
-	// --- Fill Perception Vector ---
-	// [0-3] Closest Food (Visual)
-	if (found_food) {
+	if(found_food)
+	{
 		glm::vec3 direction = closest_food_pos - agent_pos;
-		if (glm::length2(direction) > 1e-6f) direction = glm::normalize(direction);
+		if(glm::length2(direction) > 1e-6f) direction = glm::normalize(direction);
 		else direction = glm::vec3(0.0f);
-		perception[0] = direction.x;
-		perception[1] = direction.y;
-		perception[2] = direction.z;
-		perception[3] = sqrt(min_food_dist_sq);
+		values[perception::FOOD_DIRECTION] = direction.x;
+		values[perception::FOOD_DIRECTION + 1] = direction.y;
+		values[perception::FOOD_DIRECTION + 2] = direction.z;
+		values[perception::FOOD_DISTANCE] = std::sqrt(min_food_dist_sq);
 	}
-	// [4-7] Closest Threat/Prey (Visual)
-	if (found_threat) {
+	if(found_threat)
+	{
 		glm::vec3 direction = closest_threat_pos - agent_pos;
-		if (glm::length2(direction) > 1e-6f) direction = glm::normalize(direction);
+		if(glm::length2(direction) > 1e-6f) direction = glm::normalize(direction);
 		else direction = glm::vec3(0.0f);
-		perception[4] = direction.x;
-		perception[5] = direction.y;
-		perception[6] = direction.z;
-		perception[7] = sqrt(min_threat_dist_sq);
+		values[perception::THREAT_DIRECTION] = direction.x;
+		values[perception::THREAT_DIRECTION + 1] = direction.y;
+		values[perception::THREAT_DIRECTION + 2] = direction.z;
+		values[perception::THREAT_DISTANCE] = std::sqrt(min_threat_dist_sq);
+		values[perception::THREAT_PROXIMITY] = 1.0f - std::clamp(
+			values[perception::THREAT_DISTANCE] / detection_radius, 0.0f, 1.0f);
 	}
-	// [8-11] Closest Friend (Visual)
-	if (found_follow) {
+	if(found_follow)
+	{
 		glm::vec3 direction = closest_follow_pos - agent_pos;
-		if (glm::length2(direction) > 1e-6f) direction = glm::normalize(direction);
+		if(glm::length2(direction) > 1e-6f) direction = glm::normalize(direction);
 		else direction = glm::vec3(0.0f);
-		perception[8] = direction.x;
-		perception[9] = direction.y;
-		perception[10] = direction.z;
-		perception[11] = sqrt(min_follow_dist_sq);
+		values[perception::FRIEND_DIRECTION] = direction.x;
+		values[perception::FRIEND_DIRECTION + 1] = direction.y;
+		values[perception::FRIEND_DIRECTION + 2] = direction.z;
+		values[perception::FRIEND_DISTANCE] = std::sqrt(min_follow_dist_sq);
+	}
+	if(max_scent_intensity > 0.0f)
+	{
+		if(glm::length2(strongest_scent_dir) > 1e-6f) strongest_scent_dir = glm::normalize(strongest_scent_dir);
+		values[perception::SCENT_DIRECTION] = strongest_scent_dir.x;
+		values[perception::SCENT_DIRECTION + 1] = strongest_scent_dir.y;
+		values[perception::SCENT_DIRECTION + 2] = strongest_scent_dir.z;
+		values[perception::SCENT_INTENSITY] = std::min(max_scent_intensity, 1.0f);
 	}
 
-	// --- SENSOR: Scent Gradient ---
-	// [12-15] Strongest Scent (dir xyz, intensity)
-	glm::vec3 strongest_scent_dir(0.0f);
-	float max_scent_intensity = 0.0f;
-	
-	// Scent radius (30) matches the spatial grid cell size, so this touches
-	// at most one ring of neighbouring cells.
-	const float scent_radius = sqrt(MAX_SCENT_RADIUS_SQ);
-	if (m_type == AgentType::FEEDER) {
-		world.m_vegetable_grid.visit(agent_pos, scent_radius, [&](size_t i) {
-			const Food& food = world.m_food[i];
-			float dist_sq = glm::distance2(agent_pos, food.position);
-			if (dist_sq < MAX_SCENT_RADIUS_SQ) {
-				float intensity = 1.0f / (dist_sq + 1.0f);
-				if (intensity > max_scent_intensity) {
-					max_scent_intensity = intensity;
-					strongest_scent_dir = food.position - agent_pos;
-				}
-			}
-		});
-	} else { // PREDATOR
-		world.m_meat_grid.visit(agent_pos, scent_radius, [&](size_t i) { // Smell MEAT
-			const Food& food = world.m_food[i];
-			float dist_sq = glm::distance2(agent_pos, food.position);
-			if (dist_sq < MAX_SCENT_RADIUS_SQ) {
-				float intensity = 1.0f / (dist_sq + 1.0f);
-				if (intensity > max_scent_intensity) {
-					max_scent_intensity = intensity;
-					strongest_scent_dir = food.position - agent_pos;
-				}
-			}
-		});
-		world.m_feeder_grid.visit(agent_pos, scent_radius, [&](size_t i) { // Smell FEEDERS
-			const Agent& other = world.m_agents[i];
-			if (&other == this) return;
-			float dist_sq = glm::distance2(agent_pos, glm::vec3(world.sensed_agent_transform(i)[3]));
-			if (dist_sq < MAX_SCENT_RADIUS_SQ) {
-				float intensity = 1.5f / (dist_sq + 1.0f); // Agents are a stronger scent
-				if (intensity > max_scent_intensity) {
-					max_scent_intensity = intensity;
-					strongest_scent_dir = glm::vec3(world.sensed_agent_transform(i)[3]) - agent_pos;
-				}
-			}
-		});
-	}
-
-	if (max_scent_intensity > 0.0f) {
-		if (glm::length2(strongest_scent_dir) > 1e-6f) strongest_scent_dir = glm::normalize(strongest_scent_dir);
-		perception[12] = strongest_scent_dir.x;
-		perception[13] = strongest_scent_dir.y;
-		perception[14] = strongest_scent_dir.z;
-		perception[15] = std::min(max_scent_intensity, 1.0f);
-	}
-
-	// --- SENSOR: Auditory ---
-	// [16-19] Loudest Sound (dir xyz, intensity)
 	glm::vec3 loudest_sound_dir(0.0f);
 	float max_sound_intensity = 0.0f;
-
-	for (const auto& sound : world.m_sound_events) {
-		float dist_sq = glm::distance2(agent_pos, sound.position);
-		if (dist_sq < MAX_SOUND_RADIUS_SQ) {
-			float perceived_intensity = sound.intensity / (dist_sq + 1.0f);
-			if (perceived_intensity > max_sound_intensity) {
+	for(const SoundEvent& sound : world.m_audible_sound_events)
+	{
+		const glm::vec3 offset = sound.position - agent_pos;
+		const float dist_sq = glm::length2(offset);
+		if(dist_sq < MAX_SOUND_RADIUS_SQ)
+		{
+			const float perceived_intensity = sound.intensity / (dist_sq + 1.0f);
+			if(perceived_intensity > max_sound_intensity)
+			{
 				max_sound_intensity = perceived_intensity;
-				loudest_sound_dir = sound.position - agent_pos;
+				loudest_sound_dir = offset;
 			}
 		}
 	}
-
-	if (max_sound_intensity > 0.0f) {
-		if (glm::length2(loudest_sound_dir) > 1e-6f) loudest_sound_dir = glm::normalize(loudest_sound_dir);
-		perception[16] = loudest_sound_dir.x;
-		perception[17] = loudest_sound_dir.y;
-		perception[18] = loudest_sound_dir.z;
-		perception[19] = std::min(max_sound_intensity, 1.0f);
+	if(max_sound_intensity > 0.0f)
+	{
+		if(glm::length2(loudest_sound_dir) > 1e-6f) loudest_sound_dir = glm::normalize(loudest_sound_dir);
+		values[perception::SOUND_DIRECTION] = loudest_sound_dir.x;
+		values[perception::SOUND_DIRECTION + 1] = loudest_sound_dir.y;
+		values[perception::SOUND_DIRECTION + 2] = loudest_sound_dir.z;
+		values[perception::SOUND_INTENSITY] = std::min(max_sound_intensity, 1.0f);
 	}
-	
-	// --- SENSOR: Boundary Avoidance ---
-	// [20-22] Boundary Avoidance (dir xyz)
-	glm::vec3 boundary_avoidance_vec(0.0f);
-	float half_world_size = world.m_world_size / 2.0f;
-	if (agent_pos.x > half_world_size - BOUNDARY_THRESHOLD) boundary_avoidance_vec.x -= 1.0f;
-	if (agent_pos.x < -half_world_size + BOUNDARY_THRESHOLD) boundary_avoidance_vec.x += 1.0f;
-	if (agent_pos.y > half_world_size - BOUNDARY_THRESHOLD) boundary_avoidance_vec.y -= 1.0f;
-	if (agent_pos.y < -half_world_size + BOUNDARY_THRESHOLD) boundary_avoidance_vec.y += 1.0f;
-	if (agent_pos.z > half_world_size - BOUNDARY_THRESHOLD) boundary_avoidance_vec.z -= 1.0f;
-	if (agent_pos.z < -half_world_size + BOUNDARY_THRESHOLD) boundary_avoidance_vec.z += 1.0f;
-	
-	if (glm::length2(boundary_avoidance_vec) > 1e-6f) boundary_avoidance_vec = glm::normalize(boundary_avoidance_vec);
-	perception[20] = boundary_avoidance_vec.x;
-	perception[21] = boundary_avoidance_vec.y;
-	perception[22] = boundary_avoidance_vec.z;
 
-	// --- SENSOR: Local Agent Density ---
-	// [23] Friendly Agent Density
-	// [24] Hostile Agent Density
-	perception[23] = std::min(friendly_agent_count / 10.0f, 1.0f);
-	perception[24] = std::min(hostile_agent_count / 10.0f, 1.0f);
+	glm::vec3 boundary_avoidance(0.0f);
+	const float half_world_size = world.m_world_size / 2.0f;
+	if(agent_pos.x > half_world_size - BOUNDARY_THRESHOLD) boundary_avoidance.x -= 1.0f;
+	if(agent_pos.x < -half_world_size + BOUNDARY_THRESHOLD) boundary_avoidance.x += 1.0f;
+	if(agent_pos.y > half_world_size - BOUNDARY_THRESHOLD) boundary_avoidance.y -= 1.0f;
+	if(agent_pos.y < -half_world_size + BOUNDARY_THRESHOLD) boundary_avoidance.y += 1.0f;
+	if(agent_pos.z > half_world_size - BOUNDARY_THRESHOLD) boundary_avoidance.z -= 1.0f;
+	if(agent_pos.z < -half_world_size + BOUNDARY_THRESHOLD) boundary_avoidance.z += 1.0f;
+	if(glm::length2(boundary_avoidance) > 1e-6f) boundary_avoidance = glm::normalize(boundary_avoidance);
+	values[perception::BOUNDARY_DIRECTION] = boundary_avoidance.x;
+	values[perception::BOUNDARY_DIRECTION + 1] = boundary_avoidance.y;
+	values[perception::BOUNDARY_DIRECTION + 2] = boundary_avoidance.z;
 
-	// --- SENSOR: Internal State ---
-	// [25] Energy
-	float max_energy = (m_type == AgentType::PREDATOR) ? PREDATOR_ENERGY_TO_REPRODUCE : FEEDER_ENERGY_TO_REPRODUCE;
-    perception[25] = std::clamp(m_energy / max_energy, 0.0f, 1.0f);
-    
-    // [26] Age
-    perception[26] = static_cast<float>(m_age) / static_cast<float>(MAX_AGE);
-    
-    // [27-30] are for state, added in update()
+	const float nearest_boundary = std::min({
+		half_world_size - agent_pos.x, half_world_size + agent_pos.x,
+		half_world_size - agent_pos.y, half_world_size + agent_pos.y,
+		half_world_size - agent_pos.z, half_world_size + agent_pos.z});
+	values[perception::BOUNDARY_PROXIMITY] = 1.0f - std::clamp(
+		nearest_boundary / BOUNDARY_AWARENESS_DISTANCE, 0.0f, 1.0f);
+	values[perception::FRIENDLY_DENSITY] = std::min(friendly_agent_count / 10.0f, 1.0f);
+	values[perception::HOSTILE_DENSITY] = std::min(hostile_agent_count / 10.0f, 1.0f);
+	values[perception::FOOD_DENSITY] = std::min(food_density_count / 10.0f, 1.0f);
 
-	return perception;
+	const float max_energy = (m_type == AgentType::PREDATOR) ? PREDATOR_ENERGY_TO_REPRODUCE : FEEDER_ENERGY_TO_REPRODUCE;
+	values[perception::ENERGY] = std::clamp(m_energy / max_energy, 0.0f, 1.0f);
+	values[perception::AGE] = static_cast<float>(m_age) / static_cast<float>(MAX_AGE);
+	values[perception::VELOCITY] = m_velocity.x;
+	values[perception::VELOCITY + 1] = m_velocity.y;
+	values[perception::VELOCITY + 2] = m_velocity.z;
+	values[perception::HEADING] = agent_fwd.x;
+	values[perception::HEADING + 1] = agent_fwd.y;
+	values[perception::HEADING + 2] = agent_fwd.z;
+	values[perception::ENERGY_TREND] = std::clamp(m_energy_trend, -1.0f, 1.0f);
+	return values;
 }
 
-// The "Teacher" - sets the correct state based on the agent's internal world model.
+// Rule-based teacher for the high-level state. The state brain learns from
+// these transitions; richer continuous inputs are appended in train_state_brain().
 void Agent::update_state_transitions(const Simulation& /* world */)
 {
 	State next_state;
-	
 	if(m_type == AgentType::FEEDER)
 	{
-		if(m_threat_pos != glm::vec3(0.0f))
-		{
-			// Priority 1: Survival. If a threat is detected, FLEE.
-			next_state = State::FLEE;
-		} else if(m_energy < FEEDER_ENERGY_TO_REPRODUCE * 0.9f && m_food_pos != glm::vec3(0.0f))
-		{
-			// Priority 2: Sustenance. If safe and hungry, HUNT for food.
-			// Hunt if energy is below 90% of reproduction level, which is a better
-			// indicator of need than the arbitrary INITIAL_ENERGY.
+		if(m_threat_pos != glm::vec3(0.0f)) next_state = State::FLEE;
+		else if(m_energy < FEEDER_ENERGY_TO_REPRODUCE * 0.9f && m_food_pos != glm::vec3(0.0f))
 			next_state = State::HUNT;
-		} else
-		{
-			// Priority 3: Social/Exploration. If safe and not hungry, ROAM.
-			// Roaming is a more active and useful default state than IDLE.
-			next_state = State::ROAM;
-		}
-	} else
+		else next_state = State::ROAM;
+	}
+	else
 	{
-		// Predator Logic
-		if(m_threat_pos != glm::vec3(0.0f))
-		{
-			// Priority 1: Hunt other Feeder agents
+		if(m_threat_pos != glm::vec3(0.0f)) next_state = State::HUNT;
+		else if(m_food_pos != glm::vec3(0.0f) && m_energy < PREDATOR_ENERGY_TO_REPRODUCE)
 			next_state = State::HUNT;
-		} else if(m_food_pos != glm::vec3(0.0f) && m_energy < PREDATOR_ENERGY_TO_REPRODUCE)
-		{
-			// Priority 2: Hunt for meat if hungry and no agents are seen
-			next_state = State::HUNT;
-		} else
-		{
-			// Otherwise, roam to find targets
-			next_state = State::ROAM;
-		}
+		else next_state = State::ROAM;
 	}
 	m_state = next_state;
 }
 
 // Teacher-forcing for the movement brain using the new directional sensor approach.
-void Agent::prepare_brain_target(const std::vector<float>& perception_vector)
+void Agent::prepare_brain_target(std::vector<float>& perception_vector)
 {
 	glm::vec3 primary_direction(0.0f);
 	bool has_target = false;
@@ -544,7 +510,10 @@ void Agent::prepare_brain_target(const std::vector<float>& perception_vector)
 	}
 
 	// Step 2: Get the boundary avoidance vector from sensors.
-	glm::vec3 boundary_avoidance_vec(perception_vector[20], perception_vector[21], perception_vector[22]);
+	glm::vec3 boundary_avoidance_vec(
+		perception_vector[perception::BOUNDARY_DIRECTION],
+		perception_vector[perception::BOUNDARY_DIRECTION + 1],
+		perception_vector[perception::BOUNDARY_DIRECTION + 2]);
 	glm::vec3 desired_direction = primary_direction;
 
 	// Step 3: Combine the primary goal with boundary avoidance.
@@ -587,6 +556,16 @@ void Agent::prepare_brain_target(const std::vector<float>& perception_vector)
 		// For IDLE or ROAM without a target, just move forward slowly.
 		desired_translation = agent_fwd * (MAX_SPEED * 0.2f);
 	}
+
+	// The goal channels describe the exact teacher goal, including boundary
+	// avoidance, rather than a potentially conflicting independent target.
+	const glm::vec3 goal_direction = glm::length2(desired_direction) > 1e-6f
+		? glm::normalize(desired_direction) : agent_fwd;
+	perception_vector[perception::GOAL_DIRECTION] = goal_direction.x;
+	perception_vector[perception::GOAL_DIRECTION + 1] = goal_direction.y;
+	perception_vector[perception::GOAL_DIRECTION + 2] = goal_direction.z;
+	perception_vector[perception::GOAL_ALIGNMENT] = std::clamp(
+		glm::dot(agent_fwd, goal_direction), -1.0f, 1.0f);
 
 	// --- Create Target Parameter Vector for the RNN ---
 	std::vector<float> target_params(7);
@@ -636,6 +615,13 @@ void Agent::train_state_brain(const Simulation& world)
 	const int food_bin_index = NUM_ENERGY_BINS + NUM_DISTANCE_BINS
 		+ static_cast<int>(food_distance_ratio * (NUM_FOOD_DISTANCE_BINS - 0.0001f));
 	input[food_bin_index] = 1.0f;
+
+	// Compact continuous context added in perception layout v2.
+	input[perception::STATE_ENERGY_TREND] = m_perception[perception::ENERGY_TREND];
+	input[perception::STATE_FOOD_DENSITY] = m_perception[perception::FOOD_DENSITY];
+	input[perception::STATE_BOUNDARY_PROXIMITY] = m_perception[perception::BOUNDARY_PROXIMITY];
+	input[perception::STATE_GOAL_ALIGNMENT] = m_perception[perception::GOAL_ALIGNMENT];
+	input[perception::STATE_SPEED] = std::clamp(glm::length(m_velocity), 0.0f, 1.0f);
 
 	// 2. One-hot target vector for the current "correct" state (teacher).
 	const size_t target_state_id = static_cast<size_t>(m_state);
@@ -708,7 +694,8 @@ state_checksum::type Agent::checksum() const
 			for(int row = 0; row < 4; ++row)
 				state_checksum::add(hash, (*transform)[column][row]);
 	}
-	for(const float value : {m_energy, m_energy_decay_rate, m_learning_rate})
+	for(const float value : {m_energy, m_energy_decay_rate, m_learning_rate,
+		m_energy_trend, m_previous_tick_energy, m_velocity.x, m_velocity.y, m_velocity.z})
 		state_checksum::add(hash, value);
 	state_checksum::add(hash, static_cast<std::uint64_t>(m_age));
 	state_checksum::add(hash, static_cast<std::uint64_t>(m_state));
