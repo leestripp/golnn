@@ -86,8 +86,6 @@ namespace
 		glm::vec3 up{0.0f, 1.0f, 0.0f};
 		float yaw = -90.0f;
 		float pitch = 0.0f;
-		bool lmb_down = false;
-		glm::vec2 last_mouse{0.0f};
 		std::chrono::steady_clock::time_point last_update = std::chrono::steady_clock::now();
 	};
 
@@ -244,6 +242,16 @@ struct VulkanRenderer::Impl
 			extent.width = std::clamp(width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
 			extent.height = std::clamp(height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
 		}
+		std::uint32_t present_mode_count = 0;
+		check(vkGetPhysicalDeviceSurfacePresentModesKHR(physical_device, surface,
+			&present_mode_count, nullptr), "counting present modes");
+		std::vector<VkPresentModeKHR> present_modes(present_mode_count);
+		check(vkGetPhysicalDeviceSurfacePresentModesKHR(physical_device, surface,
+			&present_mode_count, present_modes.data()), "enumerating present modes");
+		const bool has_mailbox = std::find(present_modes.begin(), present_modes.end(),
+			VK_PRESENT_MODE_MAILBOX_KHR) != present_modes.end();
+		const VkPresentModeKHR present_mode = has_mailbox
+			? VK_PRESENT_MODE_MAILBOX_KHR : VK_PRESENT_MODE_FIFO_KHR;
 		std::uint32_t image_count = capabilities.minImageCount + 1;
 		if(capabilities.maxImageCount != 0) image_count = std::min(image_count, capabilities.maxImageCount);
 		VkSwapchainCreateInfoKHR create_info{}; create_info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
@@ -257,7 +265,7 @@ struct VulkanRenderer::Impl
 		create_info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
 		create_info.preTransform = capabilities.currentTransform;
 		create_info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-		create_info.presentMode = VK_PRESENT_MODE_FIFO_KHR;
+		create_info.presentMode = present_mode;
 		create_info.clipped = VK_TRUE;
 		check(vkCreateSwapchainKHR(device, &create_info, nullptr, &swapchain.handle), "vkCreateSwapchainKHR");
 		swapchain.format = surface_format.format;
@@ -279,7 +287,9 @@ struct VulkanRenderer::Impl
 			check(vkCreateSemaphore(device, &semaphore, nullptr, &swapchain.render_finished[i]), "creating presentation semaphore");
 		}
 		if(render_pass != VK_NULL_HANDLE) create_framebuffer_resources();
-		std::cout << "Vulkan swapchain: " << extent.width << 'x' << extent.height << ", " << swapchain.images.size() << " images\n";
+		std::cout << "Vulkan swapchain: " << extent.width << 'x' << extent.height << ", "
+			<< swapchain.images.size() << " images, "
+			<< (present_mode == VK_PRESENT_MODE_MAILBOX_KHR ? "mailbox" : "FIFO") << " present\n";
 	}
 
 	void destroy_swapchain()
@@ -607,14 +617,10 @@ struct VulkanRenderer::Impl
 		if(key_d) camera.position += right * velocity;
 	}
 
-	void mouse_move(const double x, const double y)
+	void apply_drag_delta(const double delta_x, const double delta_y)
 	{
-		if(!camera.lmb_down) { camera.last_mouse = glm::vec2(x, y); return; }
-		float xoffset = (static_cast<float>(x) - camera.last_mouse.x) * 0.1f;
-		const float yoffset = (camera.last_mouse.y - static_cast<float>(y)) * 0.1f;
-		camera.last_mouse = glm::vec2(x, y);
-		camera.yaw += xoffset;
-		camera.pitch = std::clamp(camera.pitch + yoffset, -89.0f, 89.0f);
+		camera.yaw += static_cast<float>(delta_x) * 0.1f;
+		camera.pitch = std::clamp(camera.pitch - static_cast<float>(delta_y) * 0.1f, -89.0f, 89.0f);
 		glm::vec3 front;
 		front.x = std::cos(glm::radians(camera.yaw)) * std::cos(glm::radians(camera.pitch));
 		front.y = std::sin(glm::radians(camera.pitch));
@@ -627,7 +633,10 @@ struct VulkanRenderer::Impl
 		if(!initialized) return false;
 		if(resize_pending) { recreate_swapchain(); return true; }
 		FrameResources& frame = frames[current_frame];
-		check(vkWaitForFences(device, 1, &frame.in_flight, VK_TRUE, std::numeric_limits<std::uint64_t>::max()), "waiting for frame");
+		constexpr std::uint64_t frame_wait_ns = 50'000'000; // Never stall GTK input indefinitely.
+		const VkResult waited = vkWaitForFences(device, 1, &frame.in_flight, VK_TRUE, frame_wait_ns);
+		if(waited == VK_TIMEOUT) return true;
+		check(waited, "waiting for frame");
 		if(grid_dirty)
 		{
 			check(vkDeviceWaitIdle(device), "waiting for grid upload");
@@ -638,8 +647,9 @@ struct VulkanRenderer::Impl
 		}
 		std::uint32_t image_index = 0;
 		const VkResult acquired = vkAcquireNextImageKHR(device, swapchain.handle,
-			std::numeric_limits<std::uint64_t>::max(), frame.image_available, VK_NULL_HANDLE, &image_index);
+			frame_wait_ns, frame.image_available, VK_NULL_HANDLE, &image_index);
 		if(acquired == VK_ERROR_OUT_OF_DATE_KHR) { resize_pending = true; return true; }
+		if(acquired == VK_TIMEOUT) return true;
 		if(acquired != VK_SUCCESS && acquired != VK_SUBOPTIMAL_KHR) check(acquired, "vkAcquireNextImageKHR");
 		check(vkResetFences(device, 1, &frame.in_flight), "resetting frame fence");
 		if(snapshot)
@@ -808,5 +818,7 @@ void VulkanRenderer::update_scene(const bool w, const bool s, const bool a, cons
 {
 	m_impl->update_camera(w, s, a, d, sprint);
 }
-void VulkanRenderer::mouse_motion(const double x, const double y) { m_impl->mouse_move(x, y); }
-void VulkanRenderer::mouse_button(const bool pressed) { m_impl->camera.lmb_down = pressed; }
+void VulkanRenderer::mouse_drag_delta(const double delta_x, const double delta_y)
+{
+	m_impl->apply_drag_delta(delta_x, delta_y);
+}

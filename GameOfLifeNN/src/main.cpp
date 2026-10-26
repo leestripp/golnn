@@ -12,8 +12,7 @@
 #include <gtkmm/application.h>
 #include <gtkmm/window.h>
 #include <gtkmm/eventcontrollerkey.h>
-#include <gtkmm/eventcontrollermotion.h>
-#include <gtkmm/eventcontrollerlegacy.h>
+#include <gtkmm/gesturedrag.h>
 #include <glibmm/main.h>
 #include <gtkmm/box.h>
 #include <gtkmm/label.h>
@@ -57,7 +56,6 @@ private:
 #ifdef GOLNN_HAS_VULKAN
 	void update_vulkan();
 	void fallback_to_opengl(std::string_view reason);
-	bool on_vulkan_mouse_button(const Glib::RefPtr<const Gdk::Event>& event);
 #endif
 
 	Glib::RefPtr<Gtk::Application> m_app;
@@ -75,6 +73,8 @@ private:
 	bool m_vulkan_ready = false;
 	int m_vulkan_x = 0;
 	int m_vulkan_y = 0;
+	double m_drag_offset_x = 0.0;
+	double m_drag_offset_y = 0.0;
 	int m_vulkan_width = 0;
 	int m_vulkan_height = 0;
 #endif
@@ -137,20 +137,30 @@ void Game::on_startup()
 	controller->signal_key_released().connect(sigc::mem_fun(*this, &Game::on_key_released), false);
 	m_window.add_controller(controller);
 #ifdef GOLNN_HAS_VULKAN
-	auto motion = Gtk::EventControllerMotion::create();
-	motion->signal_motion().connect([this](const double x, const double y) {
-		if(m_use_vulkan) m_vulkan_renderer.mouse_motion(x, y);
+	auto drag = Gtk::GestureDrag::create();
+	drag->set_button(1);
+	drag->set_exclusive(true);
+	drag->signal_drag_begin().connect([this](double, double) {
+		m_drag_offset_x = 0.0;
+		m_drag_offset_y = 0.0;
 	});
-	m_window.add_controller(motion);
-	auto buttons = Gtk::EventControllerLegacy::create();
-	buttons->signal_event().connect(sigc::mem_fun(*this, &Game::on_vulkan_mouse_button), false);
-	m_window.add_controller(buttons);
+	drag->signal_drag_update().connect([this](const double x, const double y) {
+		if(!m_use_vulkan) return;
+		m_vulkan_renderer.mouse_drag_delta(x - m_drag_offset_x, y - m_drag_offset_y);
+		m_drag_offset_x = x;
+		m_drag_offset_y = y;
+	});
+	drag->signal_drag_end().connect([this](double, double) {
+		m_drag_offset_x = 0.0;
+		m_drag_offset_y = 0.0;
+	});
+	m_vulkan_placeholder.add_controller(drag);
 #endif
 	setup_world_bounds();
 
 	m_window.signal_realize().connect([this]() {
 		m_timer_connection = Glib::signal_timeout().connect(
-			sigc::mem_fun(*this, &Game::on_timer_tick), 1);
+			sigc::mem_fun(*this, &Game::on_timer_tick), 4);
 		m_simulation_thread = std::jthread([this](const std::stop_token stop_token) {
 			run_simulation(stop_token);
 		});
@@ -346,21 +356,7 @@ void Game::update_vulkan()
 	if(!m_vulkan_renderer.render(error)) fallback_to_opengl(error);
 }
 
-bool Game::on_vulkan_mouse_button(const Glib::RefPtr<const Gdk::Event>& event)
-{
-	if(!m_use_vulkan) return false;
-	if(event->get_event_type() == Gdk::Event::Type::BUTTON_PRESS && event->get_button() == 1)
-	{
-		m_vulkan_renderer.mouse_button(true);
-		return true;
-	}
-	if(event->get_event_type() == Gdk::Event::Type::BUTTON_RELEASE && event->get_button() == 1)
-	{
-		m_vulkan_renderer.mouse_button(false);
-		return true;
-	}
-	return false;
-}
+
 #endif
 
 bool Game::on_key_pressed(const guint keyval, guint, Gdk::ModifierType)

@@ -201,6 +201,9 @@ Runtime controls: `WASD` camera, `Shift` sprint, mouse-drag look, `E` spawn 20 a
   Position the child with `compute_point()` plus `get_surface_transform()` (titlebar
   and native borders), and set its `wp_viewport` destination to the GTK allocation;
   buffer pixels and GTK logical units differ under fractional scaling (e.g. 1.25).
+  Use mailbox presentation when available: FIFO/vsync on the GTK thread can block
+  pointer-drag processing until mouse release. Camera drags use `Gtk::GestureDrag`;
+  frame fence/acquire waits are bounded so rendering cannot stall input indefinitely.
 - Vulkan GLSL is in `GameOfLifeNN/shaders`; generated `.spv.inc` arrays are checked in.
   After shader edits run `tools/compile_vulkan_shaders.sh` (requires glslang-tools and
   spirv-tools). Normal builds need no shader compiler. Validation smoke:

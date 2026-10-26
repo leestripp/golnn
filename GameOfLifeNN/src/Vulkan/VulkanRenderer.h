@@ -30,8 +30,7 @@ public:
 	void set_render_snapshot(std::shared_ptr<const WorldSnapshot> snapshot);
 	void set_grid_data(const std::vector<glm::vec3>& grid_data);
 	void update_scene(bool key_w, bool key_s, bool key_a, bool key_d, bool is_sprinting);
-	void mouse_motion(double x, double y);
-	void mouse_button(bool pressed);
+	void mouse_drag_delta(double delta_x, double delta_y);
 
 private:
 	struct Impl;
